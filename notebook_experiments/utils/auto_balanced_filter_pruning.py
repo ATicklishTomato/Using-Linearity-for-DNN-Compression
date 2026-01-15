@@ -106,29 +106,58 @@ def select_top_channels(conv, r):
     _, idx = torch.sort(M, descending=True)
     return idx[:r]
 
+def prune_batchnorm(bn: nn.BatchNorm2d, keep_idx):
+    bn.num_features = len(keep_idx)
+
+    bn.weight = nn.Parameter(bn.weight.data[keep_idx])
+    bn.bias = nn.Parameter(bn.bias.data[keep_idx])
+
+    bn.running_mean = bn.running_mean.data[keep_idx].clone()
+    bn.running_var = bn.running_var.data[keep_idx].clone()
+
+def prune_conv_input(conv: nn.Conv2d, keep_idx):
+    conv.weight = nn.Parameter(conv.weight.data[:, keep_idx])
+    conv.in_channels = len(keep_idx)
+
 
 def prune_stage(stage: nn.ModuleList, keep_idx):
     """
-    Applies identical channel pruning to all blocks in a stage
+    Correct ResNet-18 stage pruning:
+    - conv1 out
+    - conv2 in AND out
+    - batchnorms
+    - downsample path
     """
     for block in stage:
-        # conv1: prune output channels
+        # ---- conv1 + bn1 ----
         block.conv1.weight = nn.Parameter(
             block.conv1.weight.data[keep_idx]
         )
         block.conv1.out_channels = len(keep_idx)
 
-        # conv2: prune input channels
+        prune_batchnorm(block.bn1, keep_idx)
+
+        # ---- conv2 in + out ----
         block.conv2.weight = nn.Parameter(
-            block.conv2.weight.data[:, keep_idx]
+            block.conv2.weight.data[keep_idx][:, keep_idx]
         )
         block.conv2.in_channels = len(keep_idx)
+        block.conv2.out_channels = len(keep_idx)
 
-        # downsample if exists
+        prune_batchnorm(block.bn2, keep_idx)
+
+        # ---- downsample path ----
         if block.downsample is not None:
-            ds = block.downsample[0]
-            ds.weight = nn.Parameter(ds.weight.data[keep_idx])
-            ds.out_channels = len(keep_idx)
+            ds_conv = block.downsample[0]
+            ds_bn = block.downsample[1]
+
+            ds_conv.weight = nn.Parameter(
+                ds_conv.weight.data[keep_idx]
+            )
+            ds_conv.out_channels = len(keep_idx)
+
+            prune_batchnorm(ds_bn, keep_idx)
+
 
 
 # ---------------------------------------------------------
@@ -158,20 +187,28 @@ class AFPResNet18:
 
     def prune_and_retrain(self, train_fn, retrain_epochs):
         for p in self.schedule:
-            for stage_name, stage in zip(
-                ["layer1", "layer2", "layer3", "layer4"],
-                [
-                    self.model.layer1,
-                    self.model.layer2,
-                    self.model.layer3,
-                    self.model.layer4,
-                ],
-            ):
+            stages = [self.model.layer1, self.model.layer2, self.model.layer3, self.model.layer4]
+
+            prev_keep_idx = None
+
+            for i, stage in enumerate(stages):
                 conv = stage[0].conv1
+
+                # If not first stage, prune input channels from previous stage
+                if prev_keep_idx is not None:
+                    prune_conv_input(conv, prev_keep_idx)
+
+                # Decide how many channels to keep in this stage
                 orig = conv.out_channels
                 r = max(1, int(orig * (1 - p)))
+
                 keep_idx = select_top_channels(conv, r)
+
+                # Prune entire stage (blocks + BN + residuals)
                 prune_stage(stage, keep_idx)
+
+                # Save for next stage
+                prev_keep_idx = keep_idx
 
             hooks = apply_auto_balanced_regularization(
                 self.model, self.target_channels, self.alpha

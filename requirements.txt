@@ -1,6 +1,7 @@
 --find-links https://download.pytorch.org/whl/cu130
 torch
 torchvision
+torch-pruning
 numpy
 matplotlib
 tqdm
