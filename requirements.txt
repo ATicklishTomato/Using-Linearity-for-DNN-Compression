@@ -5,3 +5,10 @@ torch-pruning
 numpy
 matplotlib
 tqdm
+llama-models
+llama-stack==0.2.23
+transformers
+huggingface_hub
+datasets
+accelerate
+sentencepiece
