@@ -12,3 +12,5 @@ huggingface_hub
 datasets
 accelerate
 sentencepiece
+pandas
+pandas-stubs
