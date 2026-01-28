@@ -178,3 +178,5 @@ cython_debug/
 
 **/data/*
 *.login
+*.pt
+**/compressed_llama2_7b
