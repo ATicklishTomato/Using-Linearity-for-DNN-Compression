@@ -69,31 +69,34 @@ def print_architecture(model):
     for name, module in model.named_modules():
         logger.info(f"{name}: {module.__class__}")
 
-def retrieve_mean_preactivations(model, tokenizer, dataset, device='cuda', save=False):
+def retrieve_mean_preactivations(model, tokenizer, dataset, max_batches=30, device='cuda', save=False):
     """Compute the mean of preactivations for each activation layer in the model. Function does this by computing the mean preactivation values over a set of input data. For Llama with RMS normalization before and after self-attention, we can't retrieve preactivations from normalization parameters. Thus, we must calculate the mean of the input of the normalization before activation named 'model.layers.n.post_attention_layernorm' and 'model.layers.n.mlp.act_fn' where n is the layer number.
     Args:
         model: The neural network model.
         tokenizer: The tokenizer for the model.
         dataset: The dataset to compute preactivations on.
+        max_batches: Maximum number of batches to process from the dataset.
         device: Device to run the computations on.
+        save: Whether to save/load the computed mean preactivations to/from disk.
 
     Returns:
         dict: A dictionary with layer names as keys and mean preactivation values as values.
     """
-    save_path = f"./results/mean_preactivations_llama2_7b.pt"
-    if not os.path.exists("./results"):
-        os.makedirs("./results")
+    save_path = f"./mean_preactivations_llama2_7b.pt"
     if save and os.path.exists(save_path):
         logger.info("Loading mean preactivations from disk...")
         return torch.load(save_path)
 
     model.to(device)
     model.eval()
-    mean_preactivations = {}
     activation_layers = []
+
+    # Storage
+    channel_sums = {}     # name -> tensor [D]
+    sample_counts = {}    # name -> int
     hooks = []
 
-    logger.debug("Identifying activation layers and registering hooks...")
+    logger.info("Identifying activation layers and registering hooks...")
     # Identify activation layers
     for name, module in model.named_modules():
         if re.match(r'model\.layers\.\d+\.mlp\.act_fn', name) or re.match(r'model\.layers\.\d+\.post_attention_layernorm', name):
@@ -102,26 +105,41 @@ def retrieve_mean_preactivations(model, tokenizer, dataset, device='cuda', save=
     # Define hook to capture preactivations
     def get_preactivation_hook(name):
         def hook(module, input, output):
-            if name not in mean_preactivations:
-                mean_preactivations[name] = []
-            mean_preactivations[name].append(input[0].detach().cpu())
+            # input[0] shape: [B, T, D]
+            x = input[0].detach()
+
+            B, T, D = x.shape
+
+            # Mean over batch + sequence, keep hidden dimension
+            per_dim_batch_mean = x.mean(dim=(0, 1))  # [D]
+
+            if name not in channel_sums:
+                channel_sums[name] = per_dim_batch_mean * (B * T)
+                sample_counts[name] = B * T
+            else:
+                channel_sums[name] += per_dim_batch_mean * (B * T)
+                sample_counts[name] += B * T
+
         return hook
+
     # Register hooks
     for name, module in activation_layers:
         hooks.append(module.register_forward_hook(get_preactivation_hook(name)))
     logger.debug("Hooks registered. Performing forward passes...")
     # Forward pass through the data
     with torch.no_grad():
-        for i in tqdm(range(2), desc="Processing samples for preactivations", leave=False):
+        for i in tqdm(range(min(max_batches, len(dataset))), desc="Processing samples for preactivations", leave=False):
             inputs = tokenizer(dataset[i]['text'], return_tensors='pt', truncation=True, padding='max_length', max_length=512)
             inputs = {k: v.to(device) for k, v in inputs.items()}
             model(**inputs)
     logger.debug("Forward passes complete. Computing mean preactivations...")
+
     # Compute mean preactivations
-    for name in mean_preactivations:
-        all_preacts = torch.cat(mean_preactivations[name], dim=0)
-        mean_value = all_preacts.mean().item()
-        mean_preactivations[name] = mean_value
+    mean_preactivations = {}
+    for name in channel_sums:
+        per_dim_mean = channel_sums[name] / sample_counts[name]  # [D]
+        mean_preactivations[name] = per_dim_mean.mean().item()   # scalar
+
     logger.debug("Mean preactivations computed.")
     # Remove hooks
     for hook in hooks:
@@ -135,9 +153,10 @@ def retrieve_mean_preactivations(model, tokenizer, dataset, device='cuda', save=
     return mean_preactivations
 
 def map_mean_preactivations(mean_preactivations):
+    # Map the preactivations of the activations to the preceding attention layer for clarity
     mapped_mean_preactivations = {}
     for layer_name, mean_val in mean_preactivations.items():
-        match = re.match(r'model\.layers\.(\d+)\.post_attention_layernorm', layer_name)
+        match = re.match(r'model\.layers\.(\d+)\.mlp\.act_fn', layer_name)
         if match:
             layer_num = match.group(1)
             mapped_mean_preactivations[f'model.layers.{layer_num}.self_attn'] = mean_val
@@ -455,7 +474,7 @@ def run_transformer_compression_experiment(model: str, dataset: str, batch_size:
     # Load and preprocess the dataset
     train_dataset, val_dataset = load_datasets(tokenizer, dataset, batch_size)
 
-    mean_preactivations = retrieve_mean_preactivations(model, tokenizer, val_dataset, save=True)
+    mean_preactivations = retrieve_mean_preactivations(model, tokenizer, val_dataset, max_batches=max_batches)
     mapped_mean_preactivations = map_mean_preactivations(mean_preactivations)
 
     threshold = choose_threshold(mapped_mean_preactivations, percentile=25)

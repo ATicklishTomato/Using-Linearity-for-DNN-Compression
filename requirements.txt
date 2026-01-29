@@ -1,12 +1,10 @@
---find-links https://download.pytorch.org/whl/cu130
-torch
+--find-links https://download.pytorch.org/whl/cu121
 torchvision
 torch-pruning
 numpy
 matplotlib
 tqdm
 llama-models
-llama-stack==0.2.23
 transformers
 huggingface_hub
 datasets
@@ -15,3 +13,4 @@ sentencepiece
 pandas
 pandas-stubs
 wandb
+typing_extensions>=4.7
