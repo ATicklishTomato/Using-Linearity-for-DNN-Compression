@@ -36,13 +36,15 @@ def parse_args():
                         help='Batch size for training and evaluation.')
     parser.add_argument('--epochs', type=int, default=10,
                         help='Number of epochs for training and fine-tuning.')
-    parser.add_argument('--lr', type=float, default=1e-4,
+    parser.add_argument('--lr', type=float, default=2e-5,
                         help='Learning rate for optimizer.')
     parser.add_argument('--max_batches', type=int, default=None,
                         help='Maximum number of batches to process during training/evaluation. ' +
                                 'If None, process all batches.')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility.')
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
+                        help='Device to run the experiments on (e.g., "cpu", "cuda").')
     parser.add_argument('--verbose', action='store_true',
                         help='Enable verbose logging.')
     parser.add_argument('--save', action='store_true',

@@ -1,4 +1,4 @@
-Seed,Original Accuracy (%),Pruned Accuracy (%)
-42,75.80,65.60
-66,75.80,65.64
-762,75.80,65.30
+Seed,Original Accuracy (%),Pruned Accuracy (%),Accuracy Loss (%),Original Params,Pruned Params,Original Inf Time (ms/sample),Pruned Inf Time (ms/sample)
+42,75.80,65.55,10.24,11689512,11746600,0.0101,0.0103
+66,75.80,65.73,10.06,11689512,11746600,0.0106,0.0097
+762,75.80,65.45,10.34,11689512,11746600,0.0109,0.0106

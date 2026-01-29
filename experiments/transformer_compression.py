@@ -80,7 +80,9 @@ def retrieve_mean_preactivations(model, tokenizer, dataset, device='cuda', save=
     Returns:
         dict: A dictionary with layer names as keys and mean preactivation values as values.
     """
-    save_path = f"./mean_preactivations_llama2_7b.pt"
+    save_path = f"./results/mean_preactivations_llama2_7b.pt"
+    if not os.path.exists("./results"):
+        os.makedirs("./results")
     if save and os.path.exists(save_path):
         logger.info("Loading mean preactivations from disk...")
         return torch.load(save_path)
@@ -407,11 +409,11 @@ def train_approximation_layers(device: str, tokenizer, train_dataset, groups, sa
 
         if save_model:
             # Save the compressed model
-            compressed_model.save_pretrained("./compressed_llama2_7b")
-            logger.info("Compressed model saved to ./compressed_llama2_7b")
+            compressed_model.save_pretrained("./results/compressed_llama2_7b")
+            logger.info("Compressed model saved to ./results/compressed_llama2_7b")
     else:
-        compressed_model = LlamaForCausalLM.from_pretrained("./compressed_llama2_7b").to(device)
-        logger.info("Compressed model loaded from ./compressed_llama2_7b")
+        compressed_model = LlamaForCausalLM.from_pretrained("./results/compressed_llama2_7b").to(device)
+        logger.info("Compressed model loaded from ./results/compressed_llama2_7b")
 
     return compressed_model
 
@@ -430,7 +432,7 @@ def run_transformer_compression_experiment(model: str, dataset: str, batch_size:
     """
     logger.info(f"Running transformer compression experiment for {model} and dataset: {dataset}")
 
-    login(token=open("../hf.login").read().strip())
+    login(token=open("./hf.login").read().strip())
 
     logger.debug(f"CUDA Available: {torch.cuda.is_available()}")
     logger.debug(f"GPU: {torch.cuda.get_device_name(0)}")
@@ -441,7 +443,7 @@ def run_transformer_compression_experiment(model: str, dataset: str, batch_size:
     logger.debug(f"Matmul allow tf32: {torch.backends.cuda.matmul.allow_tf32}")
     logger.debug(f"CuDNN allow tf32: {torch.backends.cudnn.allow_tf32}")
 
-    if model == "llama-2-7b":
+    if model == "llama7b":
         # Load the Llama-2-7B model and tokenizer
         model = LlamaForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf")
         tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
