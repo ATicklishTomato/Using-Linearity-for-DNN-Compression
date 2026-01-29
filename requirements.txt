@@ -14,3 +14,4 @@ accelerate
 sentencepiece
 pandas
 pandas-stubs
+wandb
