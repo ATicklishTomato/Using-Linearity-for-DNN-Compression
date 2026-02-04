@@ -10,15 +10,15 @@
 #SBATCH --mem=8G
 #SBATCH --gpus=1                      # This is how to request a GPU
 
-# Load modules or software if needed optimized for GPU use if available
-# In the example PyTorch is made available for import in to my_sript.py
+# Only load python because PyTorch module is garbage on this cluster
 module purge
-module load PyTorch/2.1.2-foss-2023a-CUDA-12.1.1
+module load Python/3.12.3-GCCcore-13.3.0
 
 python -m venv .venv
 source .venv/bin/activate # Activate virtual environment
 
-pip install -r requirements.txt # Install leftover dependencies
+# Install dependencies
+pip install -r requirements.txt
 
 # Execute the script or command
 python main.py -m llama7b -d tinystories -e compression --verbose
