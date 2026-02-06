@@ -126,9 +126,17 @@ def retrieve_mean_preactivations(model, tokenizer, dataset, max_batches=30, devi
     for name, module in activation_layers:
         hooks.append(module.register_forward_hook(get_preactivation_hook(name)))
     logger.debug("Hooks registered. Performing forward passes...")
+
+    # One of these is NoneType on the cluster for some reason, so extra checks to avoid errors
+    if max_batches is None:
+        num_batches = len(dataset)
+    elif len(dataset) is None:
+        num_batches = max_batches
+    else:
+        num_batches = min(max_batches, len(dataset))
     # Forward pass through the data
     with torch.no_grad():
-        for i in tqdm(range(min(max_batches, len(dataset))), desc="Processing samples for preactivations", leave=False):
+        for i in tqdm(range(num_batches), desc="Processing samples for preactivations", leave=False):
             inputs = tokenizer(dataset[i]['text'], return_tensors='pt', truncation=True, padding='max_length', max_length=512)
             inputs = {k: v.to(device) for k, v in inputs.items()}
             model(**inputs)
@@ -474,15 +482,20 @@ def run_transformer_compression_experiment(model: str, dataset: str, batch_size:
     # Load and preprocess the dataset
     train_dataset, val_dataset = load_datasets(tokenizer, dataset, batch_size)
 
-    mean_preactivations = retrieve_mean_preactivations(model, tokenizer, val_dataset, max_batches=max_batches)
+    max_batches_train = max_batches if max_batches is not None else len(train_dataset)
+    max_batches_val = max_batches if max_batches is not None else len(val_dataset)
+
+    mean_preactivations = retrieve_mean_preactivations(model, tokenizer, val_dataset, max_batches=max_batches_val)
     mapped_mean_preactivations = map_mean_preactivations(mean_preactivations)
+    logger.info(f"Mean preactivations identified and mapped.")
 
     threshold = choose_threshold(mapped_mean_preactivations, percentile=25)
     linear_layers = identify_linear_layers(mapped_mean_preactivations, threshold)
     groups = group_contiguous_layers(linear_layers)
+    logger.info(f"Number of groups: {len(groups)}")
 
     compressed_model = train_approximation_layers(device, tokenizer, train_dataset, groups, save_model=save,
-                                                    epochs=epochs, lr=lr, max_batches=max_batches)
+                                                    epochs=epochs, lr=lr, max_batches=max_batches_train)
 
     compressed_model = finetune_model(
         compressed_model,
@@ -491,7 +504,7 @@ def run_transformer_compression_experiment(model: str, dataset: str, batch_size:
         device,
         epochs=epochs,
         lr=lr,
-        max_batches=max_batches
+        max_batches=max_batches_train
     )
 
     original_model = LlamaForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf").to(device)
@@ -500,7 +513,7 @@ def run_transformer_compression_experiment(model: str, dataset: str, batch_size:
         tokenizer,
         val_dataset,
         device,
-        max_batches=max_batches,
+        max_batches=max_batches_val,
     )
 
     # Evaluate compressed model
@@ -509,7 +522,7 @@ def run_transformer_compression_experiment(model: str, dataset: str, batch_size:
         tokenizer,
         val_dataset,
         device,
-        max_batches=max_batches,
+        max_batches=max_batches_val,
     )
 
     size_reduction = (1 - compressed_params / original_params) * 100

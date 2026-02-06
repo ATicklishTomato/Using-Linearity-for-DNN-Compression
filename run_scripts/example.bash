@@ -4,7 +4,6 @@
 #SBATCH --output=my_job_output_%j.txt
 #SBATCH --partition tue.gpu2.q
 #SBATCH --gres=gpu:l4.22gb:1
-#SBATCH --exclusive
 #SBATCH --time=16:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
