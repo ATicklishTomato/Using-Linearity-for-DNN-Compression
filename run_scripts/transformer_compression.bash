@@ -2,13 +2,13 @@
 
 #SBATCH --job-name=transformer_compression
 #SBATCH --output=transformer_compression_output_%j.txt
-#SBATCH --partition=tue.gpu.q         # Choose a partition that has GPUs
-#SBATCH --time=16:00:00
+#SBATCH --partition tue.gpu2.q
+#SBATCH --gres=gpu:l4.22gb:1
+#SBATCH --time=04:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
-#SBATCH --gpus=1                      # This is how to request a GPU
 
 # Only load python because PyTorch module is garbage on this cluster
 module purge
@@ -21,4 +21,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m llama7b -d tinystories -e compression --verbose
+python main.py -m llama7b -d tinystories -e compression --max_batches 32 --verbose

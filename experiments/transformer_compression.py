@@ -158,6 +158,10 @@ def retrieve_mean_preactivations(model, tokenizer, dataset, max_batches=30, devi
         torch.save(mean_preactivations, save_path)
         logger.info("Mean preactivations saved to disk.")
 
+    # Return model to cpu and free vram cache
+    model.cpu()
+    torch.cuda.empty_cache()
+
     return mean_preactivations
 
 def map_mean_preactivations(mean_preactivations):
@@ -172,7 +176,7 @@ def map_mean_preactivations(mean_preactivations):
 
     return mapped_mean_preactivations
 
-def choose_threshold(mean_preactivations, percentile=25):
+def choose_threshold(mean_preactivations, percentile=75):
     """Choose a threshold based on the given percentile of mean preactivation values."""
     values = list(mean_preactivations.values())
     threshold = np.percentile(values, percentile)
@@ -181,7 +185,7 @@ def choose_threshold(mean_preactivations, percentile=25):
 
 def identify_linear_layers(mean_preactivations, threshold):
     """Identify layers with mean preactivation below the threshold."""
-    linear_layers = [layer for layer, mean_val in mean_preactivations.items() if mean_val < threshold]
+    linear_layers = [layer for layer, mean_val in mean_preactivations.items() if mean_val > threshold]
     logger.debug(f"Identified linear layers: {linear_layers}")
     return linear_layers
 
@@ -212,7 +216,8 @@ def group_contiguous_layers(linear_layers):
 class LinearAttentionBlock(torch.nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
-        self.linear = torch.nn.Linear(hidden_size, hidden_size)
+        logger.debug(f"Initializing Linear Attention Block with hidden size {hidden_size}")
+        self.linear = torch.nn.Linear(hidden_size, hidden_size, dtype=torch.float32) # Initialize as fp32 first
 
     def forward(self, hidden_states, **kwargs):
         return self.linear(hidden_states)
@@ -285,6 +290,7 @@ def train_block_approximation(
 
     optimizer = torch.optim.AdamW(approx.parameters(), lr=lr)
     loss_fn = torch.nn.MSELoss()
+    scaler = torch.amp.GradScaler(device)
 
     model.eval()
     approx.train()
@@ -302,24 +308,33 @@ def train_block_approximation(
                 max_length=512
             ).to(device)
 
-            with torch.no_grad():
-                x = model.model.embed_tokens(inputs.input_ids)
-                y_teacher = get_attention_block_output(
-                    model,
-                    layer_group,
-                    x,
-                    inputs.attention_mask
-                )
 
-            y_student = approx(x)
-            loss = loss_fn(y_student, y_teacher)
+            with torch.amp.autocast(device):
+                with torch.no_grad():
+                    x = model.model.embed_tokens(inputs.input_ids)
+                    y_teacher = get_attention_block_output(
+                        model,
+                        layer_group,
+                        x,
+                        inputs.attention_mask
+                    )
+
+                y_student = approx(x)
+                logger.debug(f"y_student shape: {y_student.shape}, y_teacher shape: {y_teacher.shape}")
+                logger.debug(f"y_student NaN: {torch.any(torch.isnan(y_student))}, y_teacher NaN: {torch.any(torch.isnan(y_teacher))}")
+                loss = loss_fn(y_student, y_teacher)
 
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
         logger.info(f"Block {layer_group} | Epoch {epoch} | Loss {loss.item():.6f}")
 
+    if model.config.dtype == torch.float16:
+        logger.debug("Reducing dtype to float16 to match model")
+        approx = approx.half()
     return approx
 
 def finetune_model(model, tokenizer, train_dataset, device, epochs=5, lr=2e-5, max_batches=500):
@@ -485,11 +500,11 @@ def run_transformer_compression_experiment(model: str, dataset: str, batch_size:
     max_batches_train = max_batches if max_batches is not None else len(train_dataset)
     max_batches_val = max_batches if max_batches is not None else len(val_dataset)
 
-    mean_preactivations = retrieve_mean_preactivations(model, tokenizer, val_dataset, max_batches=max_batches_val)
+    mean_preactivations = retrieve_mean_preactivations(model, tokenizer, val_dataset, max_batches=4)
     mapped_mean_preactivations = map_mean_preactivations(mean_preactivations)
     logger.info(f"Mean preactivations identified and mapped.")
 
-    threshold = choose_threshold(mapped_mean_preactivations, percentile=25)
+    threshold = choose_threshold(mapped_mean_preactivations, percentile=75)
     linear_layers = identify_linear_layers(mapped_mean_preactivations, threshold)
     groups = group_contiguous_layers(linear_layers)
     logger.info(f"Number of groups: {len(groups)}")
@@ -507,9 +522,8 @@ def run_transformer_compression_experiment(model: str, dataset: str, batch_size:
         max_batches=max_batches_train
     )
 
-    original_model = LlamaForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf").to(device)
     original_loss, original_ppl, original_params, original_time, original_top_5_accuracy = evaluate_model(
-        original_model,
+        model,
         tokenizer,
         val_dataset,
         device,

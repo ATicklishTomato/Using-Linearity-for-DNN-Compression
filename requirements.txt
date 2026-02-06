@@ -1,6 +1,7 @@
 --find-links https://download.pytorch.org/whl/cu121
 torchvision
 torch-pruning
+torch
 numpy
 matplotlib
 tqdm
@@ -13,4 +14,3 @@ sentencepiece
 pandas
 pandas-stubs
 wandb
-typing_extensions>=4.7
