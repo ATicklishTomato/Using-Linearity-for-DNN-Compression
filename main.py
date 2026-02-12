@@ -18,6 +18,12 @@ def parse_args():
                         choices=['resnet18', 'resnet34', 'resnet50', 'llama7b', 'llama13b'],
                         default='resnet18',
                         help='Model architecture to use for the experiment.')
+    parser.add_argument('-l', '--linearity', type=str,
+                        choices=['mean_preactivation', 'procrustes', 'fraction'],
+                        default='mean_preactivation',
+                        help='Linearity metric to use. `mean_preactivation` refers to the mean of preactivations as defined by Pinson et al. (2024). ' +
+                             '`procrustes` refers to the Procrustes similarity-based metric as defined by Razzhigaev et al (2024). ' +
+                             '`fraction` refers to the fraction of neurons that is activated by an activation function.')
     parser.add_argument('-d', '--dataset', type=str,
                         choices=['imagenet', 'tinystories'],
                         default='imagenet',
@@ -32,6 +38,11 @@ def parse_args():
                         choices=['pruning', 'distillation'],
                         default='pruning',
                         help='The relation experiment to run. Only applicable if experiment type is "relation". Ignored otherwise.')
+    parser.add_argument('-t', '--threshold', type=str,
+                        default=None,
+                        help='The threshold to use for determining what is(n\'t) linear. To take a percentile, ' +
+                             'enter a percentage, e.g. \'75%\' to consider anything smaller the 75th percentile as non-linear. ' +
+                             'To take a hard threshold, enter a floating point value, e.g. \'-0.01\'. Default is 75th percentile.')
     parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size for training and evaluation.')
     parser.add_argument('--epochs', type=int, default=10,
@@ -51,12 +62,6 @@ def parse_args():
                         help='Save the trained models and results to ./results directory.')
     parser.add_argument('--wandb_project', type=str, default='inherent_linearity_experiments',
                         help='Weights & Biases project name for logging.')
-    parser.add_argument('--wandb_api_key',
-                        type=str,
-                        default=None,
-                        help='Your personal API key for Weights and Biases. Default is None. Alternatively, you can ' +
-                             'leave this empty and store the key in a file in the root of this script called "wandb.login". ' +
-                             'This file will be ignored by git.')
     parser.add_argument('--wandb_tags',
                         type=str,
                         nargs='*',
@@ -86,9 +91,7 @@ if __name__ == '__main__':
         'max_batches': args.max_batches,
     }
 
-    if args.wandb_api_key is not None:
-        wandb.login(key=args.wandb_api_key)
-    elif os.path.exists('wandb.login'):
+    if os.path.exists('wandb.login'):
         with open('wandb.login', 'r') as f:
             wandb.login(key=f.read())
     else:

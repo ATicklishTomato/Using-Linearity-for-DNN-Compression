@@ -1,0 +1,172 @@
+import re
+import torch
+import os
+import logging
+from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
+
+class LinearityMetric:
+
+    def __init__(self, metric_name, model_name, data_handler, threshold, max_batches=None, device='cuda', save=False):
+        """Encapsulating class that manages the application of the correct metric implementation for a model."""
+
+        self.metric_name = metric_name
+        self.model_name = model_name
+        self.data_handler = data_handler
+        self.thresholder = self.threshold_fn(threshold)
+        self.max_batches = max_batches if max_batches is not None else len(data_handler.train_set)
+        self.device = device
+        self.save = save
+
+        match (model_name, metric_name):
+            case ("Llama-2-7b", "mean_preactivation") | ("Llama-2-13b", "mean_preactivation"):
+                self.metric_fn = lambda model: mean_preactivations_llama(model, self.data_handler.tokenizer,
+                                                                         self.data_handler.val_set,
+                                                                         max_batches=self.max_batches,
+                                                                         device=self.device, save=self.save)
+            case ("Llama-2-7b", "procrustes") | ("Llama-2-13b", "procrustes"):
+                raise NotImplementedError("Procrustes metric not implemented for Llama yet.")
+            case ("Llama-2-7b", "fraction") | ("Llama-2-13b", "fraction"):
+                raise NotImplementedError("Fraction metric not implemented for Llama yet.")
+            case ("Resnet-18", "mean_preactivation") | ("Resnet-34", "mean_preactivation") | ("Resnet-50", "mean_preactivation"):
+                raise NotImplementedError("Mean preactivation metric not implemented for Resnet yet.")
+            case("Resnet-18", "procrustes") | ("Resnet-34", "procrustes") | ("Resnet-50", "procrustes"):
+                raise NotImplementedError("Procrustes metric not implemented for Resnet yet.")
+            case("Resnet-18", "fraction") | ("Resnet-34", "fraction") | ("Resnet-50", "fraction"):
+                raise NotImplementedError("Fraction metric not implemented for Resnet yet.")
+            case _:
+                raise ValueError(f"Unsupported model and metric combination: {model_name} and {metric_name}.")
+
+        logger.info("LinearityMetric initialized with model: {model_name}, metric: {metric_name}, threshold: {threshold}, max_batches: {max_batches}, device: {device}, save: {save}.")
+
+
+    def threshold_fn(self, threshold):
+        """Encapsulating a threshold function that either splits based on a percentile or float.
+        Args:
+            threshold (str): A string that is one of the following: None, a percentage, e.g. `75%`, or a float.
+        Returns:
+            A function that takes a dictionary of layer names and linearity scores, and splits it into two dictionaries.
+            """
+        logger.info(f"Threshold: {threshold}")
+        if threshold is None:
+            logger.debug(f"Threshold is None, defaulting to 75%")
+            thresholder = lambda dictionary: (
+                {k: v for k, v in dictionary.items() if v >= torch.quantile(torch.tensor(list(dictionary.values())), 0.75)},
+                {k: v for k, v in dictionary.items() if v < torch.quantile(torch.tensor(list(dictionary.values())), 0.75)}
+            )
+        elif isinstance(threshold, str) and threshold.endswith('%'):
+            percentage = float(threshold[:-1]) / 100.0
+            logger.debug(f"Threshold is percentage: {percentage}")
+            thresholder = lambda dictionary: (
+                {k: v for k, v in dictionary.items() if v >= torch.quantile(torch.tensor(list(dictionary.values())), percentage)},
+                {k: v for k, v in dictionary.items() if v < torch.quantile(torch.tensor(list(dictionary.values())), percentage)}
+            )
+        else:
+            try:
+                float_threshold = float(threshold)
+                logger.debug(f"Threshold is float: {float_threshold}")
+                thresholder = lambda dictionary: (
+                    {k: v for k, v in dictionary.items() if v >= float_threshold},
+                    {k: v for k, v in dictionary.items() if v < float_threshold}
+                )
+            except ValueError:
+                raise ValueError(f"Invalid threshold value: {threshold}. Must be None, a percentage string (e.g., '75%'), or a float.")
+
+        return thresholder
+
+
+def mean_preactivations_llama(model, tokenizer, dataset, max_batches=30, device='cuda', save=False):
+    """Compute the mean of preactivations for each activation layer in the model. Function does this by computing the mean preactivation values over a set of input data. For Llama with RMS normalization before and after self-attention, we can't retrieve preactivations from normalization parameters. Thus, we must calculate the mean of the input of the normalization before activation named 'model.layers.n.post_attention_layernorm' and 'model.layers.n.mlp.act_fn' where n is the layer number.
+    Args:
+        model: The neural network model.
+        tokenizer: The tokenizer for the model.
+        dataset: The dataset to compute preactivations on.
+        max_batches: Maximum number of batches to process from the dataset.
+        device: Device to run the computations on.
+        save: Whether to save/load the computed mean preactivations to/from disk.
+
+    Returns:
+        dict: A dictionary with layer names as keys and mean preactivation values as values.
+    """
+    save_path = f"./mean_preactivations_llama2_7b.pt"
+    if save and os.path.exists(save_path):
+        logger.info("Loading mean preactivations from disk...")
+        return torch.load(save_path)
+
+    model.to(device)
+    model.eval()
+    activation_layers = []
+
+    # Storage
+    channel_sums = {}     # name -> tensor [D]
+    sample_counts = {}    # name -> int
+    hooks = []
+
+    logger.info("Identifying activation layers and registering hooks...")
+    # Identify activation layers
+    for name, module in model.named_modules():
+        if re.match(r'model\.layers\.\d+\.mlp\.act_fn', name) or re.match(r'model\.layers\.\d+\.post_attention_layernorm', name):
+            activation_layers.append((name, module))
+    logger.debug("Identified layers, setting hooks...")
+    # Define hook to capture preactivations
+    def get_preactivation_hook(name):
+        def hook(module, input, output):
+            # input[0] shape: [B, T, D]
+            x = input[0].detach()
+
+            B, T, D = x.shape
+
+            # Mean over batch + sequence, keep hidden dimension
+            per_dim_batch_mean = x.mean(dim=(0, 1))  # [D]
+
+            if name not in channel_sums:
+                channel_sums[name] = per_dim_batch_mean * (B * T)
+                sample_counts[name] = B * T
+            else:
+                channel_sums[name] += per_dim_batch_mean * (B * T)
+                sample_counts[name] += B * T
+
+        return hook
+
+    # Register hooks
+    for name, module in activation_layers:
+        hooks.append(module.register_forward_hook(get_preactivation_hook(name)))
+    logger.debug("Hooks registered. Performing forward passes...")
+
+    # One of these is NoneType on the cluster for some reason, so extra checks to avoid errors
+    if max_batches is None:
+        num_batches = len(dataset)
+    elif len(dataset) is None:
+        num_batches = max_batches
+    else:
+        num_batches = min(max_batches, len(dataset))
+    # Forward pass through the data
+    with torch.no_grad():
+        for i in tqdm(range(num_batches), desc="Processing samples for preactivations", leave=False):
+            inputs = tokenizer(dataset[i]['text'], return_tensors='pt', truncation=True, padding='max_length', max_length=512)
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            model(**inputs)
+    logger.debug("Forward passes complete. Computing mean preactivations...")
+
+    # Compute mean preactivations
+    mean_preactivations = {}
+    for name in channel_sums:
+        per_dim_mean = channel_sums[name] / sample_counts[name]  # [D]
+        mean_preactivations[name] = per_dim_mean.mean().item()   # scalar
+
+    logger.debug("Mean preactivations computed.")
+    # Remove hooks
+    for hook in hooks:
+        hook.remove()
+    logger.debug("Hooks removed.")
+
+    if save:
+        torch.save(mean_preactivations, save_path)
+        logger.info("Mean preactivations saved to disk.")
+
+    # Return model to cpu and free vram cache
+    model.cpu()
+    torch.cuda.empty_cache()
+
+    return mean_preactivations
