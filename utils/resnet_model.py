@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -82,3 +84,33 @@ class ResNetExperimenter:
         if self.save:
             torch.save(self.model.state_dict(), f"./results/{self.model_name}_finetuned.pth")
             logger.info(f"Saved finetuned model to results/{self.model_name}_finetuned.pth")
+
+    def validate_model(self):
+        model = self.model.to(self.device).eval()
+        correct = 0
+        total = 0
+        inference_time = 0
+        data_loader = DataLoader(self.data_handler.val_set, batch_size=self.batch_size, shuffle=False)
+        num_batches = min(self.max_batches, len(data_loader))
+        with torch.no_grad():
+            for inputs, labels in tqdm(data_loader, total=num_batches, desc="Validating ResNet model", leave=False):
+                if total >= self.max_batches * self.batch_size:
+                    break
+                inputs = inputs.to(self.device)
+                labels = labels.to(self.device)
+
+                start = time.time()
+                outputs = model(inputs)
+                end = time.time()
+                _, predicted = torch.max(outputs, 1)
+
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+                inference_time += (end - start)
+
+        accuracy = correct / total
+
+        param_count = sum(p.numel() for p in model.parameters())
+        inference_time /= total
+
+        return accuracy, param_count, inference_time
