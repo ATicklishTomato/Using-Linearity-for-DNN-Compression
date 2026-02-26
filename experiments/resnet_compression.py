@@ -241,7 +241,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         os.makedirs("./results", exist_ok=True)
 
         # Save folded model
-        torch.save(folded_model.state_dict(), f"./results/{model}_folded.pth")
+        torch.save(experimenter.model.state_dict(), f"./results/{model}_folded.pth")
 
         # Save results
         results = {
