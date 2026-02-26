@@ -22,11 +22,11 @@ class ResNetExperimenter:
         self.save = save
 
         match model_name:
-            case "Resnet-18":
+            case "resnet18":
                 self.model = self._initialize_resnet_model(18)
-            case "Resnet-34":
+            case "resnet34":
                 self.model = self._initialize_resnet_model(34)
-            case "Resnet-50":
+            case "resnet50":
                 self.model = self._initialize_resnet_model(50)
             case _:
                 raise ValueError(f"Unsupported model: {model_name}.")

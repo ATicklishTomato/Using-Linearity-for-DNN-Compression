@@ -106,6 +106,8 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
     np.random.seed(args.seed)
     random.seed(args.seed)
 
@@ -116,6 +118,10 @@ if __name__ == '__main__':
             from experiments.transformer_compression import run_transformer_compression_experiment
             run_transformer_compression_experiment(args.model, args.dataset, args.batch_size,
                                                    args.epochs, args.lr, args.max_batches, args.save, args.device)
+        case ('resnet18' | 'resnet34' | 'resnet50', 'compression', _):
+            from experiments.resnet_compression import run_experiment
+            run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
+                           args.epochs, args.lr, args.max_batches, args.save, args.seed, args.device)
         case _:
             logger.error("Invalid combination of model, experiment, and relation.")
             raise ValueError("Invalid combination of model, experiment, and relation.")

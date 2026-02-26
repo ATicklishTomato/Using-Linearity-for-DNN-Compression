@@ -27,32 +27,32 @@ class LinearityMetric:
         self.model_name = model_name
         self.data_handler = data_handler
         self.thresholder = self.threshold_fn(threshold)
-        self.max_batches = max_batches if max_batches is not None else len(data_handler.train_set)
+        self.max_batches = max_batches if max_batches is not None else len(data_handler.val_set)
         self.device = device
         self.save = save
 
         match (model_name, metric_name):
-            case ("Llama-2-7b", "mean_preactivation") | ("Llama-2-13b", "mean_preactivation"):
+            case ("llama7b", "mean_preactivation") | ("llama13b", "mean_preactivation"):
                 self.metric_fn = lambda model: mean_preactivations_llama(model, self.data_handler.tokenizer,
                                                                          self.data_handler.val_set,
                                                                          max_batches=self.max_batches,
                                                                          device=self.device, save=self.save)
-            case ("Llama-2-7b", "procrustes") | ("Llama-2-13b", "procrustes"):
+            case ("llama7b", "procrustes") | ("llama13b", "procrustes"):
                 raise NotImplementedError("Procrustes metric not implemented for Llama yet.")
-            case ("Llama-2-7b", "fraction") | ("Llama-2-13b", "fraction"):
+            case ("llama7b", "fraction") | ("llama13b", "fraction"):
                 raise NotImplementedError("Fraction metric not implemented for Llama yet.")
-            case ("Resnet-18", "mean_preactivation") | ("Resnet-34", "mean_preactivation") | ("Resnet-50", "mean_preactivation"):
+            case ("resnet18", "mean_preactivation") | ("resnet34", "mean_preactivation") | ("resnet50", "mean_preactivation"):
                 self.metric_fn = lambda model: mean_preactivations_resnet(model, self.data_handler.val_set,
                                                                           batch_size=self.data_handler.batch_size,
                                                                           device=self.device)
-            case("Resnet-18", "procrustes") | ("Resnet-34", "procrustes") | ("Resnet-50", "procrustes"):
+            case("resnet18", "procrustes") | ("resnet34", "procrustes") | ("resnet50", "procrustes"):
                 raise NotImplementedError("Procrustes metric not implemented for Resnet yet.")
-            case("Resnet-18", "fraction") | ("Resnet-34", "fraction") | ("Resnet-50", "fraction"):
+            case("resnet18", "fraction") | ("resnet34", "fraction") | ("resnet50", "fraction"):
                 raise NotImplementedError("Fraction metric not implemented for Resnet yet.")
             case _:
                 raise ValueError(f"Unsupported model and metric combination: {model_name} and {metric_name}.")
 
-        logger.info("LinearityMetric initialized with model: {model_name}, metric: {metric_name}, threshold: {threshold}, max_batches: {max_batches}, device: {device}, save: {save}.")
+        logger.info(f"LinearityMetric initialized with model: {model_name}, metric: {metric_name}, threshold: {threshold}, max_batches: {max_batches}, device: {device}, save: {save}.")
 
 
     def threshold_fn(self, threshold):
@@ -60,7 +60,7 @@ class LinearityMetric:
         Args:
             threshold (str): A string that is one of the following: None, a percentage, e.g. `75%`, or a float.
         Returns:
-            A function that takes a dictionary of layer names and linearity scores, and splits it into two dictionaries.
+            A function that takes a dictionary of layer names and linearity scores, and splits it into two dictionaries. The first dictionary contains the layers that are considered linear (i.e., those with scores above the threshold), and the second dictionary contains the layers that are considered non-linear (i.e., those with scores below the threshold).
             """
         logger.info(f"Threshold: {threshold}")
         if threshold is None:
@@ -270,8 +270,21 @@ def mean_preactivations_resnet(model, dataset, batch_size=1, device='cuda', save
 
     logger.info("Mean preactivations computed.")
 
+    mean_preacts_conv = {}
+    for name, module in model.named_modules():
+        if isinstance(module, torch.nn.BatchNorm2d):
+            if "downsample" not in name:
+                mean = mean_preactivations.get(name, 0.0)
+                layer = name.split('bn')[0]  # Get the layer name before .bn
+                index = name.split('bn')[-1]  # Get the index if present
+                mean_preacts_conv[layer + 'conv' + index] = mean  # Copy to preceding Conv2d layer
+            else:
+                mean_preacts_conv[name] = mean_preactivations.get(name, 0.0)  # Keep downsample layers as is
+
+    logger.info("Mapped mean preactivations to preceding Conv2d layers.")
+
     if save:
-        torch.save(mean_preactivations, save_path)
+        torch.save(mean_preacts_conv, save_path)
         logger.info("Mean preactivations saved to disk.")
 
-    return mean_preactivations
+    return mean_preacts_conv

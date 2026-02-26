@@ -1,38 +1,39 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import logging
+import wandb
 from copy import deepcopy
 
+logger = logging.getLogger(__name__)
 
 def fold_linear_conv_sequences(
     model,
-    mean_preacts_conv,
-    threshold=0.1,
+    linear_layers,
+    device='cuda'
 ):
     """
     Fold Conv-BN-ReLU-Conv sequences when the activation is near-linear.
 
     Args:
         model (nn.Module): ResNet-like model (unchanged architecture)
-        mean_preacts_conv (dict): {conv_layer_name: mean preactivation}
-        threshold (float): >= threshold => ReLU considered linear
+        linear_layers (dict): {conv_layer_name: linearity_score}
+        device (str): Device to perform folding on (e.g., 'cpu', 'cuda')
 
     Returns:
         folded_model (nn.Module)
         folded_pairs (list of tuples)
     """
-
-    model = deepcopy(model)
     folded_pairs = []
+    model.to(device)
 
-    print("\n[Layer Folding] Starting folding pass")
-    print(f"[Layer Folding] Linearity threshold: {threshold}\n")
+    logger.info("\n[Layer Folding] Starting folding pass")
 
     # ------------------------------------------------------------
     # Helper: fold BN into Conv
     # ------------------------------------------------------------
     def fold_bn_into_conv(conv, bn):
-        print(f"    Folding BatchNorm into Conv ({conv.out_channels} channels)")
+        logger.debug(f"    Folding BatchNorm into Conv ({conv.out_channels} channels)")
 
         W = conv.weight
         if conv.bias is None:
@@ -57,7 +58,7 @@ def fold_linear_conv_sequences(
     # Helper: fold Conv → Conv
     # ------------------------------------------------------------
     def fold_convs(conv1, conv2):
-        print(
+        logger.debug(
             f"    Folding Conv layers: "
             f"{conv1.in_channels}→{conv1.out_channels}→{conv2.out_channels}"
         )
@@ -100,14 +101,14 @@ def fold_linear_conv_sequences(
         if not isinstance(block, nn.Sequential):
             continue
 
-        print(f"\n[Inspecting block] {module_name}")
+        logger.debug(f"\n[Inspecting block] {module_name}")
 
         # Block is a sequential with 2 basic blocks of the ResNet architecture. Iterate over them.
         for idx, module in enumerate(block):
-            # print(f" Inspecting module: {module}")
+            # logger.debug(f" Inspecting module: {module}")
 
             if not hasattr(module, 'conv1') or not hasattr(module, 'bn1') or not hasattr(module, 'relu') or not hasattr(module, 'conv2'):
-                print("  Not a Conv-BN-ReLU-Conv block → skipping")
+                logger.debug("  Not a Conv-BN-ReLU-Conv block → skipping")
                 continue
 
             conv1 = module.conv1
@@ -121,22 +122,15 @@ def fold_linear_conv_sequences(
                 and isinstance(relu, nn.ReLU)
                 and isinstance(conv2, nn.Conv2d)
             ):
-                print("  Not Conv-BN-ReLU-Conv → skipping")
+                logger.debug("  Not Conv-BN-ReLU-Conv → skipping")
                 continue
 
             conv1_name = f"{module_name}.{idx}.conv1"
-            mean_act = mean_preacts_conv.get(conv1_name, None)
 
-            print(f"  Found Conv-BN-ReLU-Conv at {conv1_name}")
+            logger.debug(f"  Found Conv-BN-ReLU-Conv at {conv1_name}")
 
-            if mean_act is None:
-                print("    No preactivation stats → skipping")
-                continue
-
-            print(f"    Mean preactivation: {mean_act:.4f}")
-
-            if mean_act < threshold:
-                print("    Below threshold → ReLU not linear")
+            if conv1_name not in linear_layers.keys():
+                logger.debug("    Below threshold → ReLU not linear")
                 continue
 
             # Validate foldability
@@ -146,11 +140,11 @@ def fold_linear_conv_sequences(
                 or conv1.groups != 1
                 or conv2.groups != 1
             ):
-                print("    Stride/groups incompatible → skipping")
+                logger.debug("    Stride/groups incompatible → skipping")
                 continue
 
-            print("    Linearity condition satisfied")
-            print("    Removing BatchNorm and ReLU, folding Convs")
+            logger.debug("    Linearity condition satisfied")
+            logger.debug("    Removing BatchNorm and ReLU, folding Convs")
 
             # ----------------------------------------------------
             # Fold BN → Conv1
@@ -161,6 +155,7 @@ def fold_linear_conv_sequences(
             # Fold Conv1 → Conv2
             # ----------------------------------------------------
             new_conv = fold_convs(conv1, conv2)
+            new_conv.to(device)
 
             # ----------------------------------------------------
             # Replace modules
@@ -172,26 +167,106 @@ def fold_linear_conv_sequences(
 
             folded_pairs.append((conv1_name, f"{module_name}.{idx}.conv2"))
 
-            print("    Folding complete")
+            logger.debug("    Folding complete")
 
-    print(f"\n[Layer Folding] Done. Folded {len(folded_pairs)} layer pairs.\n")
+    logger.info(f"\n[Layer Folding] Done. Folded {len(folded_pairs)} layer pairs.\n")
 
-    return model, folded_pairs
+    return folded_pairs
 
-
-def map_preactivations(model, mean_preacts):
-    """Map mean preactivations from BatchNorm layers to their preceding Conv2d layers.
+def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
+                           epochs: int, lr: float, max_batches: int, save: bool, seed: int, device: str):
+    """Run the ResNet compression experiment. Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
     Args:
-        model (nn.Module): The ResNet-like model.
-        mean_preacts (dict): A dictionary mapping BatchNorm layer names to their mean preactivation values.
-    Returns:
-        mean_preacts_conv (dict): A dictionary mapping Conv2d layer names to their mean preactivation values.
+        model (str): The ResNet architecture to use (e.g., 'resnet18').
+        linearity (str): The linearity metric to use (e.g., 'mean_preactivation', 'procrustes', or 'fraction').
+        dataset (str): The dataset to use (e.g., 'imagenet').
+        threshold (str): The threshold for determining linearity (e.g., '75%' or '-0.01').
+        batch_size (int): The batch size for training and evaluation.
+        epochs (int): The number of epochs for fine-tuning.
+        lr (float): The learning rate for the optimizer.
+        max_batches (int): The maximum number of batches to process during training/evaluation.
+        save (bool): Whether to save the trained models and results.
+        seed (int): The random seed for reproducibility.
+        device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
     """
-    mean_preacts_conv = {}
-    for name, module in model.named_modules():
-        if isinstance(module, torch.nn.BatchNorm2d):
-            mean = mean_preacts.get(name, 0.0)
-            layer = name.split('bn')[0]  # Get the layer name before .bn
-            index = name.split('bn')[-1]  # Get the index if present
-            mean_preacts_conv[layer + 'conv' + index] = mean  # Copy to preceding Conv2d layer
-    return mean_preacts_conv
+    from utils.data_manager import DataManager
+    from utils.resnet_model import ResNetExperimenter
+    from metrics.linearity_metrics import LinearityMetric
+
+    # ------------------------------------------------------------
+    # Load data and model
+    # ------------------------------------------------------------
+    logger.info(f"Running ResNet compression experiment with model={model}, linearity={linearity}, dataset={dataset}, threshold={threshold}, batch_size={batch_size}, epochs={epochs}, lr={lr}, max_batches={max_batches}, save={save}, seed={seed}, device={device}")
+    data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, reduction_fraction=0.1, seed=seed) # Reduce to 10% for faster experimentation
+    logger.debug(f"[Experiment] Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
+    experimenter = ResNetExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, max_batches=max_batches, device=device, save=save)
+    logger.info("Model and data loaded, model fine-tuned.")
+
+    # ------------------------------------------------------------
+    # Evaluate initial model performance
+    # ------------------------------------------------------------
+    original_accuracy, original_param_count, original_inference_time = experimenter.validate_model()
+    logger.info(f"Original model accuracy: {original_accuracy:.4f}, parameters: {original_param_count}, inference time: {original_inference_time:.4f} seconds")
+
+    # ------------------------------------------------------------
+    # Compute linearity scores
+    # ------------------------------------------------------------
+    metric = LinearityMetric(linearity, model, data_handler, threshold, max_batches, device, save)
+    linearity_scores = metric.metric_fn(experimenter.model)
+    logger.info("Linearity scores computed.")
+    logger.debug(f"Linearity scores: {linearity_scores}")
+    linear_layers, nonlinear_layers = metric.thresholder(linearity_scores)
+    logger.info(f"Determined linear layers: {linear_layers}")
+    logger.info(f"Determined non-linear layers: {nonlinear_layers}")
+
+    # ------------------------------------------------------------
+    # Fold layers based on linearity scores
+    # ------------------------------------------------------------
+    folded_pairs = fold_linear_conv_sequences(experimenter.model, linear_layers)
+    logger.debug(f"Folded layer pairs: {folded_pairs}")
+    experimenter.finetune()
+    logger.info(f"Folded {len(folded_pairs)} blocks in model and fine-tuned")
+
+    # ------------------------------------------------------------
+    # Evaluate folded model performance
+    # ------------------------------------------------------------
+    folded_accuracy, folded_param_count, folded_inference_time = experimenter.validate_model()
+    logger.info(f"Folded model accuracy: {folded_accuracy:.4f}, parameters: {folded_param_count}, inference time: {folded_inference_time:.4f} seconds")
+
+    # ------------------------------------------------------------
+    # Log results to wandb and save models/results if enabled
+    # ------------------------------------------------------------
+    if save:
+        import os
+        import json
+        os.makedirs("./results", exist_ok=True)
+
+        # Save folded model
+        torch.save(folded_model.state_dict(), f"./results/{model}_folded.pth")
+
+        # Save results
+        results = {
+            "original_accuracy": original_accuracy,
+            "original_param_count": original_param_count,
+            "original_inference_time": original_inference_time,
+            "folded_accuracy": folded_accuracy,
+            "folded_param_count": folded_param_count,
+            "folded_inference_time": folded_inference_time,
+            "folded_pairs": folded_pairs,
+        }
+        with open(f"./results/{model}_folding_results.json", "w") as f:
+            json.dump(results, f, indent=4)
+        logger.info(f"Saved folded model and results to ./results/{model}_folded.pth and ./results/{model}_folding_results.json")
+
+    wandb.log({
+        "original_accuracy": original_accuracy,
+        "original_param_count": original_param_count,
+        "original_inference_time": original_inference_time,
+        "folded_accuracy": folded_accuracy,
+        "folded_param_count": folded_param_count,
+        "folded_inference_time": folded_inference_time,
+        "folded_pairs": folded_pairs,
+    })
+    logger.info("Logged results to Weights & Biases")
+
+
