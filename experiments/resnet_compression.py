@@ -3,7 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import logging
 import wandb
-from copy import deepcopy
+from utils.data_manager import DataManager
+from utils.resnet_model import ResNetExperimenter
+from metrics.linearity_metrics import LinearityMetric
 
 logger = logging.getLogger(__name__)
 
@@ -189,9 +191,6 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
     """
-    from utils.data_manager import DataManager
-    from utils.resnet_model import ResNetExperimenter
-    from metrics.linearity_metrics import LinearityMetric
 
     # ------------------------------------------------------------
     # Load data and model
