@@ -23,13 +23,13 @@ class LlamaExperimenter:
 
         match model_name:
             case "llama-2-7b":
-                self.model, self.tokenizer = self._initialize_llama_model("meta-llama/Llama-2-7b-hf")
+                self.model = self._initialize_llama_model("meta-llama/Llama-2-7b-hf")
             case "llama-2-13b":
-                self.model, self.tokenizer = self._initialize_llama_model("meta-llama/Llama-2-13b-hf")
+                self.model = self._initialize_llama_model("meta-llama/Llama-2-13b-hf")
             case "llama-3-1b":
-                self.model, self.tokenizer = self._initialize_llama_model("meta-llama/Llama-3.2-1B")
+                self.model = self._initialize_llama_model("meta-llama/Llama-3.2-1B")
             case "llama-3-3b":
-                self.model, self.tokenizer = self._initialize_llama_model("meta-llama/Llama-3.2-3B")
+                self.model = self._initialize_llama_model("meta-llama/Llama-3.2-3B")
             case _:
                 raise ValueError(f"Unsupported model: {model_name}.")
 
@@ -38,10 +38,8 @@ class LlamaExperimenter:
     def _initialize_llama_model(self, model_path):
         """Initialize a LLaMA model with the specified path."""
         model = LlamaForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16).to(self.device)
-        tokenizer = LlamaTokenizer.from_pretrained(model_path)
-        tokenizer.pad_token = tokenizer.eos_token # Set the pad token to the end-of-sequence token to avoid warnings during training
         logger.info(f"Initialized LLaMA model from {model_path}.")
-        return model, tokenizer
+        return model
 
     def finetune(self):
         """Finetune the LLaMA model such that it can be used for linearity metric evaluations."""
@@ -49,7 +47,7 @@ class LlamaExperimenter:
         self.model.to(self.device).train()
 
         optimizer = optim.AdamW(self.model.parameters(), lr=self.learning_rate)
-        loss_fn = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)
+        loss_fn = nn.CrossEntropyLoss(ignore_index=self.data_handler.tokenizer.pad_token_id)
 
         train_loader = DataLoader(self.data_handler.train_set, batch_size=self.batch_size, shuffle=True)
         for epoch in range(self.epochs):
@@ -59,7 +57,7 @@ class LlamaExperimenter:
                 if batch_idx >= self.max_batches:
                     break
 
-                inputs = self.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(self.device)
+                inputs = self.data_handler.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(self.device)
                 labels = inputs.input_ids.clone()
                 outputs = self.model(**inputs, labels=labels)
                 logits = outputs.logits
@@ -81,7 +79,7 @@ class LlamaExperimenter:
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             save_path = f"finetuned_{self.model_name}_{timestamp}"
             self.model.save_pretrained(save_path)
-            self.tokenizer.save_pretrained(save_path)
+            self.data_handler.tokenizer.save_pretrained(save_path)
             logger.info(f"Finetuned model saved to {save_path}.")
 
     def validate_model(self):
@@ -97,7 +95,7 @@ class LlamaExperimenter:
                 if batch_idx >= self.max_batches:
                     break
 
-                inputs = self.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(self.device)
+                inputs = self.data_handler.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(self.device)
                 labels = inputs.input_ids.clone()
 
                 start_time = time.time()

@@ -225,7 +225,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     logger.info(
         f"Running Llama compression experiment with model: {model}, linearity metric: {linearity}, dataset: {dataset}, threshold: {threshold}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, max batches: {max_batches}, save results: {save}, seed: {seed}, device: {device}")
-    data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, reduction_fraction=1, seed=seed) # No reduction
+    data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, model_name=model, reduction_fraction=1, seed=seed) # No reduction
     logger.debug(f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
     experimenter = LlamaExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, max_batches=max_batches, device=device, save=save)
     logger.info("Model initialized.")
