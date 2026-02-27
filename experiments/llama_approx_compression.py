@@ -1,0 +1,306 @@
+import torch
+import wandb
+from tqdm import tqdm
+import os
+import logging
+from transformers import LlamaForCausalLM
+from metrics.linearity_metrics import LinearityMetric
+from utils.data_manager import DataManager
+from utils.llama_model import LlamaExperimenter
+
+logger = logging.getLogger(__name__)
+
+def group_contiguous_layers(linear_layers):
+    """
+    Groups contiguous model.layers[i].self_attn modules.
+    Returns a list of lists of layer indices.
+    Args:
+        linear_layers (dict): A dictionary of layer names to linearity scores for layers identified as linear.
+    Returns:
+        list of lists: A list where each element is a list of contiguous layer indices that are linear.
+    """
+    indices = sorted(
+        int(layer.split(".")[2])
+        for layer in linear_layers.keys()
+    )
+
+    groups = []
+    current = [indices[0]]
+
+    for prev, curr in zip(indices, indices[1:]):
+        if curr == prev + 1:
+            current.append(curr)
+        else:
+            groups.append(current)
+            current = [curr]
+
+    groups.append(current)
+    logger.debug(f"Grouped contiguous layers: {groups}")
+    return groups
+
+class LinearAttentionBlock(torch.nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        logger.debug(f"Initializing Linear Attention Block with hidden size {hidden_size}")
+        self.linear = torch.nn.Linear(hidden_size, hidden_size, dtype=torch.float32) # Initialize as fp32 first
+
+    def forward(self, hidden_states, **kwargs):
+        return self.linear(hidden_states)
+
+class IdentityBlock(torch.nn.Module):
+    def forward(self, hidden_states, **kwargs):
+        return hidden_states
+
+def replace_attention_block(model, layer_group, linear_block):
+    first = layer_group[0]
+
+    # Replace whole forward pass
+    model.model.layers[first].forward = linear_block.forward
+
+    # Disable remaining layers
+    for layer_id in layer_group[1:]:
+        model.model.layers[layer_id].forward = IdentityBlock().forward
+
+def prepare_attention_mask(attention_mask, hidden_states):
+    """
+    Converts tokenizer attention_mask to a format LLaMA attention accepts.
+    """
+    # attention_mask: (batch, seq)
+    # need shape: (batch, 1, 1, seq) or broadcastable
+    return attention_mask[:, None, None, :].to(dtype=torch.bool)
+
+
+@torch.no_grad()
+def get_attention_block_output(model, layer_ids, hidden_states, attention_mask):
+    batch_size, seq_len, _ = hidden_states.shape
+    device = hidden_states.device
+
+    position_ids = torch.arange(seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+    attn_mask = prepare_attention_mask(attention_mask, hidden_states)
+
+    for layer_id in layer_ids:
+        layer = model.model.layers[layer_id]
+
+        residual = hidden_states
+        normed = layer.input_layernorm(hidden_states)
+
+        position_embeddings = model.model.rotary_emb(normed, position_ids)
+
+        attn_out, _ = layer.self_attn(
+            normed,
+            attention_mask=attn_mask,
+            position_embeddings=position_embeddings,
+            past_key_values=None,
+            output_attentions=False,
+            use_cache=False,
+        )
+
+        hidden_states = residual + attn_out
+
+    return hidden_states
+
+
+def train_block_approximation(
+    model,
+    tokenizer,
+    layer_group,
+    train_dataset,
+    device,
+    epochs=1,
+    lr=2e-4,
+    max_batches=200
+):
+    hidden_size = model.config.hidden_size
+    approx = LinearAttentionBlock(hidden_size).to(device)
+
+    optimizer = torch.optim.AdamW(approx.parameters(), lr=lr)
+    loss_fn = torch.nn.MSELoss()
+    scaler = torch.amp.GradScaler(device)
+
+    model.eval()
+    approx.train()
+
+    for epoch in range(epochs):
+        for i, batch in tqdm(enumerate(train_dataset), total=min(len(train_dataset), max_batches), desc=f"Training block {layer_group} Epoch {epoch}", leave=False):
+            if i >= max_batches:
+                break
+
+            inputs = tokenizer(
+                batch["text"],
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=512
+            ).to(device)
+
+
+            with torch.amp.autocast(device):
+                with torch.no_grad():
+                    x = model.model.embed_tokens(inputs.input_ids)
+                    y_teacher = get_attention_block_output(
+                        model,
+                        layer_group,
+                        x,
+                        inputs.attention_mask
+                    )
+
+                y_student = approx(x)
+                logger.debug(f"y_student shape: {y_student.shape}, y_teacher shape: {y_teacher.shape}")
+                logger.debug(f"y_student NaN: {torch.any(torch.isnan(y_student))}, y_teacher NaN: {torch.any(torch.isnan(y_teacher))}")
+                loss = loss_fn(y_student, y_teacher)
+
+            optimizer.zero_grad()
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
+        logger.info(f"Block {layer_group} | Epoch {epoch} | Loss {loss.item():.6f}")
+
+    if model.config.dtype == torch.float16:
+        logger.debug("Reducing dtype to float16 to match model")
+        approx = approx.half()
+    return approx
+
+
+def train_approximation_layers(experimenter, train_dataset, groups, save_model: bool,
+                               epochs: int, lr: float, max_batches: int, device: str):
+    """Train linear approximations for specified layer groups in the model.
+    Args:
+        experimenter: The LlamaExperimenter instance containing the model to be compressed and its tokenizer.
+        train_dataset: The training dataset.
+        groups: List of layer groups to approximate.
+        save_model (bool): Whether to save the compressed model to disk.
+        epochs (int): Number of epochs to train.
+        lr (float): Learning rate for training.
+        max_batches (int): Maximum number of batches to process during training.
+        device (str): The device to run the training on (e.g., 'cuda' or 'cpu').
+    Returns:
+        The compressed model with linear approximations.
+    """
+
+    if not os.path.exists(f"./results/compressed_{experimenter.model_name}"):
+        for layer_group in groups:
+            logger.info(f"Training approximation for layer group: {layer_group}")
+            linear_block = train_block_approximation(
+                experimenter.model,
+                experimenter.tokenizer,
+                layer_group,
+                train_dataset,
+                device,
+                epochs=epochs,
+                lr=lr,
+                max_batches=max_batches
+            )
+            replace_attention_block(experimenter.model, layer_group, linear_block)
+
+        if save_model:
+            # Save the compressed model
+            experimenter.model.save_pretrained(f"./results/compressed_{experimenter.model_name}")
+            logger.info(f"Compressed model saved to ./results/compressed_{experimenter.model_name}")
+    else:
+        experimenter.model = LlamaForCausalLM.from_pretrained(f"./results/compressed_{experimenter.model_name}").to(device)
+        logger.info(f"Compressed model loaded from ./results/compressed_{experimenter.model_name}")
+
+
+def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
+                           epochs: int, lr: float, max_batches: int, save: bool, seed: int, device: str):
+    """Run the Llama compression experiment. Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
+    Args:
+        model (str): The ResNet architecture to use (e.g., 'llama-2-7b').
+        linearity (str): The linearity metric to use (e.g., 'mean_preactivation', 'procrustes', or 'fraction').
+        dataset (str): The dataset to use (e.g., 'imagenet').
+        threshold (str): The threshold for determining linearity (e.g., '75%' or '-0.01').
+        batch_size (int): The batch size for training and evaluation.
+        epochs (int): The number of epochs for fine-tuning.
+        lr (float): The learning rate for the optimizer.
+        max_batches (int): The maximum number of batches to process during training/evaluation.
+        save (bool): Whether to save the trained models and results.
+        seed (int): The random seed for reproducibility.
+        device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
+    """
+
+    # ------------------------------------------------------------
+    # Load data and model
+    # ------------------------------------------------------------
+    logger.info(
+        f"Running Llama compression experiment with model: {model}, linearity metric: {linearity}, dataset: {dataset}, threshold: {threshold}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, max batches: {max_batches}, save results: {save}, seed: {seed}, device: {device}")
+    data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, reduction_fraction=1, seed=seed) # No reduction
+    logger.debug(f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
+    experimenter = LlamaExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, max_batches=max_batches, device=device, save=save)
+    logger.info("Model initialized.")
+
+    # ------------------------------------------------------------
+    # Evaluate initial model performance
+    # ------------------------------------------------------------
+    original_accuracy, original_param_count, original_inference_time = experimenter.validate_model()
+    logger.info(
+        f"Original model accuracy: {original_accuracy:.4f}, parameters: {original_param_count}, inference time: {original_inference_time:.4f} seconds")
+
+    # ------------------------------------------------------------
+    # Compute linearity scores
+    # ------------------------------------------------------------
+    metric = LinearityMetric(linearity, model, data_handler, threshold, max_batches, device, save)
+    linearity_scores = metric.metric_fn(experimenter.model)
+    logger.info("Linearity scores computed.")
+    logger.debug(f"Linearity scores: {linearity_scores}")
+    linear_layers, nonlinear_layers = metric.thresholder(linearity_scores)
+    logger.info(f"Determined linear layers: {linear_layers}")
+    logger.info(f"Determined non-linear layers: {nonlinear_layers}")
+
+    # ------------------------------------------------------------
+    # Group contiguous linear layers and create linear approximation layers
+    # ------------------------------------------------------------
+    groups = group_contiguous_layers(linear_layers)
+    train_approximation_layers(experimenter, data_handler.train_set, groups, save_model=save,
+                               epochs=epochs, lr=lr, max_batches=max_batches, device=device)
+    logger.info("Linear approximation layers trained and integrated into the model.")
+
+    # ------------------------------------------------------------
+    # Finetune the compressed model
+    # ------------------------------------------------------------
+    experimenter.finetune()
+
+    # ------------------------------------------------------------
+    # Evaluate compressed model performance
+    # ------------------------------------------------------------
+    compressed_accuracy, compressed_param_count, compressed_inference_time = experimenter.validate_model()
+    logger.info(
+        f"Compressed model accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, inference time: {compressed_inference_time:.4f} seconds")
+
+    # ------------------------------------------------------------
+    # Log results to wandb and save models/results if enabled
+    # ------------------------------------------------------------
+    if save:
+        import os
+        import json
+        os.makedirs("./results", exist_ok=True)
+
+        # Save compressed model
+        torch.save(experimenter.model.state_dict(), f"./results/{model}_compressed.pth")
+
+        # Save results
+        results = {
+            "original_accuracy": original_accuracy,
+            "original_param_count": original_param_count,
+            "original_inference_time": original_inference_time,
+            "compressed_accuracy": compressed_accuracy,
+            "compressed_param_count": compressed_param_count,
+            "compressed_inference_time": compressed_inference_time,
+            "compressed_groups": groups,
+        }
+        with open(f"./results/{model}_folding_results.json", "w") as f:
+            json.dump(results, f, indent=4)
+        logger.info(
+            f"Saved compressed model and results to ./results/{model}_compressed.pth and ./results/{model}_folding_results.json")
+
+    wandb.log({
+        "original_accuracy": original_accuracy,
+        "original_param_count": original_param_count,
+        "original_inference_time": original_inference_time,
+        "compressed_accuracy": compressed_accuracy,
+        "compressed_param_count": compressed_param_count,
+        "compressed_inference_time": compressed_inference_time,
+        "compressed_groups": groups,
+    })
+    logger.info("Logged results to Weights & Biases")

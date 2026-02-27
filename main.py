@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def parse_args():
     parser = ArgumentParser(description='Execute experiments on inherent linearity in ResNets and Llamas.')
     parser.add_argument('-m', '--model', type=str,
-                        choices=['resnet18', 'resnet34', 'resnet50', 'llama7b', 'llama13b'],
+                        choices=['resnet18', 'resnet34', 'resnet50', 'llama-2-7b', 'llama-2-13b', 'llama-3-1b', 'llama-3-3b'],
                         default='resnet18',
                         help='Model architecture to use for the experiment.')
     parser.add_argument('-l', '--linearity', type=str,
@@ -103,6 +103,8 @@ if __name__ == '__main__':
         tags=args.wandb_tags
     )
 
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
@@ -114,12 +116,12 @@ if __name__ == '__main__':
     logger.info(f"Starting experiment with configuration: {wandb_config}")
 
     match (args.model, args.experiment, args.relation):
-        case ('llama7b' | 'llama13b', 'compression', _):
-            from experiments.transformer_compression import run_transformer_compression_experiment
-            run_transformer_compression_experiment(args.model, args.dataset, args.batch_size,
-                                                   args.epochs, args.lr, args.max_batches, args.save, args.device)
+        case ('llama-2-7b' | 'llama-2-13b' | 'llama-3-1b' | 'llama-3-3b', 'compression', _):
+            from experiments.llama_approx_compression import run_experiment
+            run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
+                           args.epochs, args.lr, args.max_batches, args.save, args.seed, args.device)
         case ('resnet18' | 'resnet34' | 'resnet50', 'compression', _):
-            from experiments.resnet_compression import run_experiment
+            from experiments.resnet_fold_compression import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
                            args.epochs, args.lr, args.max_batches, args.save, args.seed, args.device)
         case _:

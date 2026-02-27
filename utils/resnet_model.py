@@ -86,6 +86,7 @@ class ResNetExperimenter:
             logger.info(f"Saved finetuned model to results/{self.model_name}_finetuned.pth")
 
     def validate_model(self):
+        """Validate the ResNet model and compute accuracy, parameter count, and inference time."""
         model = self.model.to(self.device).eval()
         correct = 0
         total = 0

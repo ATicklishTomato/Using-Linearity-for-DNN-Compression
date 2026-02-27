@@ -32,22 +32,22 @@ class LinearityMetric:
         self.save = save
 
         match (model_name, metric_name):
-            case ("llama7b", "mean_preactivation") | ("llama13b", "mean_preactivation"):
+            case ("llama-2-7b" | "llama-2-13b" | "llama-3-1b" | "llama-3-3b", "mean_preactivation"):
                 self.metric_fn = lambda model: mean_preactivations_llama(model, self.data_handler.tokenizer,
                                                                          self.data_handler.val_set,
                                                                          max_batches=self.max_batches,
                                                                          device=self.device, save=self.save)
-            case ("llama7b", "procrustes") | ("llama13b", "procrustes"):
+            case ("llama-2-7b" | "llama-2-13b" | "llama-3-1b" | "llama-3-3b", "procrustes"):
                 raise NotImplementedError("Procrustes metric not implemented for Llama yet.")
-            case ("llama7b", "fraction") | ("llama13b", "fraction"):
+            case ("llama-2-7b" | "llama-2-13b" | "llama-3-1b" | "llama-3-3b", "fraction"):
                 raise NotImplementedError("Fraction metric not implemented for Llama yet.")
-            case ("resnet18", "mean_preactivation") | ("resnet34", "mean_preactivation") | ("resnet50", "mean_preactivation"):
+            case ("resnet18" | "resnet34" | "resnet50", "mean_preactivation"):
                 self.metric_fn = lambda model: mean_preactivations_resnet(model, self.data_handler.val_set,
                                                                           batch_size=self.data_handler.batch_size,
                                                                           device=self.device)
-            case("resnet18", "procrustes") | ("resnet34", "procrustes") | ("resnet50", "procrustes"):
+            case("resnet18" | "resnet34" | "resnet50", "procrustes"):
                 raise NotImplementedError("Procrustes metric not implemented for Resnet yet.")
-            case("resnet18", "fraction") | ("resnet34", "fraction") | ("resnet50", "fraction"):
+            case("resnet18" | "resnet34" | "resnet50", "fraction"):
                 raise NotImplementedError("Fraction metric not implemented for Resnet yet.")
             case _:
                 raise ValueError(f"Unsupported model and metric combination: {model_name} and {metric_name}.")
@@ -183,7 +183,15 @@ def mean_preactivations_llama(model, tokenizer, dataset, max_batches=30, device=
     model.cpu()
     torch.cuda.empty_cache()
 
-    return mean_preactivations
+    mapped_mean_preactivations = {}
+    for layer_name, mean_val in mean_preactivations.items():
+        match = re.match(r'model\.layers\.(\d+)\.mlp\.act_fn', layer_name)
+        if match:
+            layer_num = match.group(1)
+            mapped_mean_preactivations[f'model.layers.{layer_num}.self_attn'] = mean_val
+            logger.debug(f"Mapped model.layers.{layer_num}.self_attn with mean preactivation {mean_val}")
+
+    return mapped_mean_preactivations
 
 def mean_preactivations_resnet(model, dataset, batch_size=1, device='cuda', save=False):
     """
