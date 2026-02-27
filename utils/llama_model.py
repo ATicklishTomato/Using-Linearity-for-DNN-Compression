@@ -53,7 +53,7 @@ class LlamaExperimenter:
         for epoch in range(self.epochs):
             epoch_loss = 0.0
             batch_idx = 0
-            for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{self.epochs}")):
+            for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{self.epochs}", total=min(self.max_batches, len(train_loader)), leave=False)):
                 if batch_idx >= self.max_batches:
                     break
 
@@ -91,7 +91,7 @@ class LlamaExperimenter:
         val_loader = DataLoader(self.data_handler.val_set, batch_size=self.batch_size, shuffle=False)
         num_batches = min(self.max_batches, len(val_loader))
         with torch.no_grad():
-            for batch_idx, batch in enumerate(tqdm(val_loader, total=num_batches, desc="Validating LLaMA model")):
+            for batch_idx, batch in enumerate(tqdm(val_loader, total=num_batches, desc="Validating LLaMA model", leave=False)):
                 if batch_idx >= self.max_batches:
                     break
 
