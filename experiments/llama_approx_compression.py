@@ -9,6 +9,7 @@ from utils.data_manager import DataManager
 from utils.llama_model import LlamaExperimenter
 
 logger = logging.getLogger(__name__)
+debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 def group_contiguous_layers(linear_layers):
     """
@@ -117,11 +118,11 @@ def train_block_approximation(
     loss_fn = torch.nn.MSELoss()
     scaler = torch.amp.GradScaler(device)
 
-    model.eval()
-    approx.train()
+    model.eval().to(device)
+    approx.train().to(device)
 
     for epoch in range(epochs):
-        for i, batch in tqdm(enumerate(train_dataset), total=min(len(train_dataset), max_batches), desc=f"Training block {layer_group} Epoch {epoch}", leave=False):
+        for i, batch in tqdm(enumerate(train_dataset), total=min(len(train_dataset), max_batches), desc=f"Training block {layer_group} Epoch {epoch}", leave=False, disable=debug_mode):
             if i >= max_batches:
                 break
 
@@ -163,12 +164,12 @@ def train_block_approximation(
     return approx
 
 
-def train_approximation_layers(experimenter, train_dataset, groups, save_model: bool,
+def train_approximation_layers(experimenter, data_handler, groups, save_model: bool,
                                epochs: int, lr: float, max_batches: int, device: str):
     """Train linear approximations for specified layer groups in the model.
     Args:
         experimenter: The LlamaExperimenter instance containing the model to be compressed and its tokenizer.
-        train_dataset: The training dataset.
+        data_handler: The DataHandler instance containing the dataset to be compressed and its tokenizer.
         groups: List of layer groups to approximate.
         save_model (bool): Whether to save the compressed model to disk.
         epochs (int): Number of epochs to train.
@@ -184,9 +185,9 @@ def train_approximation_layers(experimenter, train_dataset, groups, save_model: 
             logger.info(f"Training approximation for layer group: {layer_group}")
             linear_block = train_block_approximation(
                 experimenter.model,
-                experimenter.tokenizer,
+                data_handler.tokenizer,
                 layer_group,
-                train_dataset,
+                data_handler.train_set,
                 device,
                 epochs=epochs,
                 lr=lr,
@@ -252,7 +253,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # Group contiguous linear layers and create linear approximation layers
     # ------------------------------------------------------------
     groups = group_contiguous_layers(linear_layers)
-    train_approximation_layers(experimenter, data_handler.train_set, groups, save_model=save,
+    train_approximation_layers(experimenter, data_handler, groups, save_model=save,
                                epochs=epochs, lr=lr, max_batches=max_batches, device=device)
     logger.info("Linear approximation layers trained and integrated into the model.")
 

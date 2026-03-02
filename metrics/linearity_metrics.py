@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
+debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 class LinearityMetric:
 
@@ -157,10 +158,11 @@ def mean_preactivations_llama(model, tokenizer, dataset, max_batches=30, device=
         num_batches = min(max_batches, len(dataset))
     # Forward pass through the data
     with torch.no_grad():
-        for i in tqdm(range(num_batches), desc="Processing samples for preactivations", leave=False):
+        for i in tqdm(range(num_batches), desc="Processing samples for preactivations", leave=False, disable=debug_mode):
             inputs = tokenizer(dataset[i]['text'], return_tensors='pt', truncation=True, padding='max_length', max_length=512)
             inputs = {k: v.to(device) for k, v in inputs.items()}
-            model(**inputs)
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                model(**inputs)
     logger.debug("Forward passes complete. Computing mean preactivations...")
 
     # Compute mean preactivations
@@ -248,7 +250,7 @@ def mean_preactivations_resnet(model, dataset, batch_size=1, device='cuda', save
     # Register hooks on BatchNorm layers (pre-ReLU in ResNet18)
     for name, module in tqdm(model.named_modules(),
                              desc="Registering hooks",
-                             leave=False):
+                             leave=False, disable=debug_mode):
         if isinstance(module, torch.nn.BatchNorm2d):
             hooks.append(module.register_forward_hook(get_hook(name)))
 
@@ -258,7 +260,7 @@ def mean_preactivations_resnet(model, dataset, batch_size=1, device='cuda', save
     with torch.no_grad():
         for inputs, _ in tqdm(data_loader,
                               desc="Computing mean preactivations",
-                              leave=False):
+                              leave=False, disable=debug_mode):
             inputs = inputs.to(device)
             model(inputs)
 

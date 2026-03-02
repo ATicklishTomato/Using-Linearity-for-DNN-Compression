@@ -4,11 +4,13 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import logging
-from transformers import LlamaForCausalLM, LlamaTokenizer
+from transformers import LlamaForCausalLM
+from transformers.utils.logging import disable_progress_bar
 
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
+debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 class LlamaExperimenter:
     def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, max_batches=None, device='cuda', save=False):
@@ -37,7 +39,10 @@ class LlamaExperimenter:
 
     def _initialize_llama_model(self, model_path):
         """Initialize a LLaMA model with the specified path."""
-        model = LlamaForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16).to(self.device)
+        if logger.getEffectiveLevel() != logging.DEBUG:
+            disable_progress_bar()
+        model = LlamaForCausalLM.from_pretrained(model_path).to(self.device)
+        model.config.pad_token_id = self.data_handler.tokenizer.eos_token_id
         logger.info(f"Initialized LLaMA model from {model_path}.")
         return model
 
@@ -47,25 +52,27 @@ class LlamaExperimenter:
         self.model.to(self.device).train()
 
         optimizer = optim.AdamW(self.model.parameters(), lr=self.learning_rate)
-        loss_fn = nn.CrossEntropyLoss(ignore_index=self.data_handler.tokenizer.pad_token_id)
 
         train_loader = DataLoader(self.data_handler.train_set, batch_size=self.batch_size, shuffle=True)
         for epoch in range(self.epochs):
             epoch_loss = 0.0
             batch_idx = 0
-            for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{self.epochs}", total=min(self.max_batches, len(train_loader)), leave=False)):
+            for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{self.epochs}", total=min(self.max_batches, len(train_loader)), leave=False, disable=debug_mode)):
                 if batch_idx >= self.max_batches:
                     break
 
+                optimizer.zero_grad()
+
                 inputs = self.data_handler.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(self.device)
                 labels = inputs.input_ids.clone()
-                outputs = self.model(**inputs, labels=labels)
-                logits = outputs.logits
+                labels[labels == self.data_handler.tokenizer.pad_token_id] = -100
 
-                loss = loss_fn(logits.view(-1, logits.size(-1)), labels.view(-1))
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    outputs = self.model(**inputs, labels=labels)
+                    loss = outputs.loss
 
-                optimizer.zero_grad()
                 loss.backward()
+                nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 optimizer.step()
 
                 epoch_loss += loss.item()
@@ -91,7 +98,7 @@ class LlamaExperimenter:
         val_loader = DataLoader(self.data_handler.val_set, batch_size=self.batch_size, shuffle=False)
         num_batches = min(self.max_batches, len(val_loader))
         with torch.no_grad():
-            for batch_idx, batch in enumerate(tqdm(val_loader, total=num_batches, desc="Validating LLaMA model", leave=False)):
+            for batch_idx, batch in enumerate(tqdm(val_loader, total=num_batches, desc="Validating LLaMA model", leave=False, disable=debug_mode)):
                 if batch_idx >= self.max_batches:
                     break
 
@@ -99,7 +106,8 @@ class LlamaExperimenter:
                 labels = inputs.input_ids.clone()
 
                 start_time = time.time()
-                outputs = model(**inputs)
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    outputs = model(**inputs)
                 end_time = time.time()
                 inference_time += (end_time - start_time)
 

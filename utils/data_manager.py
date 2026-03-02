@@ -1,4 +1,5 @@
 from transformers import LlamaTokenizer
+from transformers.utils.logging import disable_progress_bar
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,9 @@ class DataManager:
             reduction_fraction (float, optional): Fraction of the dataset to use for faster experimentation. Defaults to 0.1.
             seed (int, optional): Random seed for reproducibility when reducing the dataset. Defaults to 42.
         """
+        if logger.getEffectiveLevel() != logging.DEBUG:
+            disable_progress_bar()
+
         self.dataset_name = dataset_name
         self.batch_size = batch_size
 

@@ -9,6 +9,7 @@ import logging
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
+debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 class ResNetExperimenter:
     def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, max_batches=None, device='cuda', save=False):
@@ -61,7 +62,7 @@ class ResNetExperimenter:
         for epoch in range(self.epochs):
             running_loss = 0.0
             for i, data in tqdm(enumerate(train_loader), total=min(len(train_loader), self.max_batches),
-                                desc=f"Finetuning Epoch {epoch+1}/{self.epochs}", leave=False):
+                                desc=f"Finetuning Epoch {epoch+1}/{self.epochs}", leave=False, disable=debug_mode):
                 if i >= self.max_batches:
                     break
                 inputs, labels = data
@@ -94,7 +95,7 @@ class ResNetExperimenter:
         data_loader = DataLoader(self.data_handler.val_set, batch_size=self.batch_size, shuffle=False)
         num_batches = min(self.max_batches, len(data_loader))
         with torch.no_grad():
-            for inputs, labels in tqdm(data_loader, total=num_batches, desc="Validating ResNet model", leave=False):
+            for inputs, labels in tqdm(data_loader, total=num_batches, desc="Validating ResNet model", leave=False, disable=debug_mode):
                 if total >= self.max_batches * self.batch_size:
                     break
                 inputs = inputs.to(self.device)
