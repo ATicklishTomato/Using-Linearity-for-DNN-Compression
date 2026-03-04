@@ -4,7 +4,7 @@ from tqdm import tqdm
 import os
 import logging
 from transformers import LlamaForCausalLM
-from metrics.linearity_metrics import LinearityMetric
+from metrics.linearity_metric_manager import LinearityMetric
 from utils.data_manager import DataManager
 from utils.llama_model import LlamaExperimenter
 

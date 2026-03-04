@@ -5,7 +5,7 @@ import logging
 import wandb
 from utils.data_manager import DataManager
 from utils.resnet_model import ResNetExperimenter
-from metrics.linearity_metrics import LinearityMetric
+from metrics.linearity_metric_manager import LinearityMetric
 
 logger = logging.getLogger(__name__)
 
