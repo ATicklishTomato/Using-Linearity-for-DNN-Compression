@@ -1,8 +1,9 @@
 import torch
+import logging
 from torch import nn
 
 """
-This code was copied from the repo supporting the paper
+This code is a modification of code in the repo supporting the paper
 A Simple and Effective Pruning Approach for Large Language Models
 Mingjie Sun*, Zhuang Liu*, Anna Bair, J. Zico Kolter (* indicates equal contribution)
 Carnegie Mellon University, Meta AI Research and Bosch Center for AI
@@ -32,6 +33,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+logger = logging.getLogger(__name__)
 
 # Define WrappedGPT class
 class WrappedGPT:
@@ -108,7 +110,7 @@ def check_sparsity(model):
             sub_count += (W==0).sum().item()
             sub_params += W.numel()
 
-        print(f"layer {i} sparsity {float(sub_count)/sub_params:.6f}")
+        logger.info(f"layer {i} sparsity {float(sub_count)/sub_params:.6f}")
 
     model.config.use_cache = use_cache
     return float(count)/total_params
@@ -161,14 +163,15 @@ def return_given_alpha(alpha, sort_res, W_metric, tmp_metric, sum_before):
     return W_mask, cur_sparsity
 
 
-def prune_wanda(args, model, tokenizer, data_handler, device='cuda', prune_n=0, prune_m=0):
+def prune_wanda(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_batches=20,
+                semistructured=False, sparsity_ratio=0.5):
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
-    print("loading calibdation data")
+    logger.info("loading calibdation data")
     # dataloader, _ = get_loaders("c4",nsamples=args.nsamples,seed=args.seed,seqlen=model.seqlen,tokenizer=tokenizer)
     dataloader = data_handler.val_set
-    print("dataset loading complete")
+    logger.info("dataset loading complete")
     with torch.no_grad():
         inps, outs, attention_mask, position_ids = prepare_calibration_input(model, dataloader, device)
 
@@ -191,16 +194,17 @@ def prune_wanda(args, model, tokenizer, data_handler, device='cuda', prune_n=0, 
             return tmp
 
         handles = []
+        num_batches = min(max_batches, len(inps))
         for name in wrapped_layers:
             handles.append(subset[name].register_forward_hook(add_batch(name)))
-        for j in range(args.nsamples):
+        for j in range(num_batches):
             with torch.no_grad():
                 outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
         for h in handles:
             h.remove()
 
         for name in subset:
-            print(f"pruning layer {i} name {name}")
+            logger.debug(f"pruning layer {i} name {name}")
             W_metric = torch.abs(subset[name].weight.data) * torch.sqrt(wrapped_layers[name].scaler_row.reshape((1,-1)))
 
             W_mask = (torch.zeros_like(W_metric) == 1)  ## initialize a mask to be all False
@@ -213,7 +217,7 @@ def prune_wanda(args, model, tokenizer, data_handler, device='cuda', prune_n=0, 
             else:
                 sort_res = torch.sort(W_metric, dim=-1, stable=True)
 
-                if args.use_variant:
+                if semistructured:
                     # wanda variant
                     tmp_metric = torch.cumsum(sort_res[0], dim=1)
                     sum_before = W_metric.sum(dim=1)
@@ -221,8 +225,8 @@ def prune_wanda(args, model, tokenizer, data_handler, device='cuda', prune_n=0, 
                     alpha = 0.4
                     alpha_hist = [0., 0.8]
                     W_mask, cur_sparsity = return_given_alpha(alpha, sort_res, W_metric, tmp_metric, sum_before)
-                    while (torch.abs(cur_sparsity - args.sparsity_ratio)>0.001) and (alpha_hist[1]-alpha_hist[0]>=0.001):
-                        if cur_sparsity > args.sparsity_ratio:
+                    while (torch.abs(cur_sparsity - sparsity_ratio)>0.001) and (alpha_hist[1]-alpha_hist[0]>=0.001):
+                        if cur_sparsity > sparsity_ratio:
                             alpha_new = (alpha + alpha_hist[0]) / 2.0
                             alpha_hist[1] = alpha
                         else:
@@ -231,15 +235,15 @@ def prune_wanda(args, model, tokenizer, data_handler, device='cuda', prune_n=0, 
 
                         alpha = alpha_new
                         W_mask, cur_sparsity = return_given_alpha(alpha, sort_res, W_metric, tmp_metric, sum_before)
-                    print(f"alpha found {alpha} sparsity {cur_sparsity:.6f}")
+                    logger.debug(f"alpha found {alpha} sparsity {cur_sparsity:.6f}")
                 else:
                     # unstructured pruning
-                    indices = sort_res[1][:,:int(W_metric.shape[1]*args.sparsity_ratio)]
+                    indices = sort_res[1][:,:int(W_metric.shape[1]*sparsity_ratio)]
                     W_mask.scatter_(1, indices, True)
 
             subset[name].weight.data[W_mask] = 0  ## set weights to zero
 
-        for j in range(args.nsamples):
+        for j in range(num_batches):
             with torch.no_grad():
                 outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
         inps, outs = outs, inps

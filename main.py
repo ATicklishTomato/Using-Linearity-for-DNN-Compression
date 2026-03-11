@@ -35,7 +35,7 @@ def parse_args():
                              'inherent linearity and another compression method. "compression" tests ' +
                              'inherent linearity as a tool for compression.')
     parser.add_argument('--relation', type=str,
-                        choices=['pruning', 'distillation'],
+                        choices=['wanda_unstructured_pruning', 'wanda_semi_2:4_pruning', 'wanda_semi_4:8_pruning'],
                         default='pruning',
                         help='The relation experiment to run. Only applicable if experiment type is "relation". Ignored otherwise.')
     parser.add_argument('-t', '--threshold', type=str,
