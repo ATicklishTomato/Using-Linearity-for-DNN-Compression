@@ -21,4 +21,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m llama-3-1b -d tinystories -e compression --max_batches 32 --batch_size 4
+python main.py -m resnet18 -d imagenet -e compression --max_batches 32 --threshold -0.1

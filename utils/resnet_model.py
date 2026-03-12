@@ -60,7 +60,8 @@ class ResNetExperimenter:
 
         self.model.train()
         for epoch in range(self.epochs):
-            running_loss = 0.0
+            epoch_loss = 0.0
+            i = 0
             for i, data in tqdm(enumerate(train_loader), total=min(len(train_loader), self.max_batches),
                                 desc=f"Finetuning Epoch {epoch+1}/{self.epochs}", leave=False, disable=debug_mode):
                 if i >= self.max_batches:
@@ -75,10 +76,12 @@ class ResNetExperimenter:
                 loss.backward()
                 optimizer.step()
 
-                running_loss += loss.item()
-                if i % 10 == 9:  # Print every 10 mini-batches
-                    logger.info(f"[Epoch {epoch + 1}, Batch {i + 1}] loss: {running_loss / 10:.3f}")
-                    running_loss = 0.0
+                epoch_loss += loss.item()
+                if i % 100 == 99:  # Print every 100 mini-batches
+                    logger.info(f"[Epoch {epoch + 1}, Batch {i + 1}] loss: {loss.item():.4f}")
+
+            avg_loss = epoch_loss / (i + 1)
+            logger.info(f"Epoch {epoch + 1} completed. Average Loss: {avg_loss:.4f}")
 
         logger.info("Finished finetuning the ResNet model.")
 

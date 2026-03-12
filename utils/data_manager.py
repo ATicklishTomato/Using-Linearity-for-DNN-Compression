@@ -35,7 +35,7 @@ class DataManager:
                 if model_name is not None:
                     raise ValueError(f"Unsupported model: {model_name}.")
                 else:
-                    logger.info("No model name provided.")
+                    logger.info("No model name provided to identify the tokenizer to preload.")
 
         match dataset_name:
             case "tinystories":

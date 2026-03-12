@@ -77,6 +77,9 @@ class LlamaExperimenter:
 
                 epoch_loss += loss.item()
 
+                if batch_idx % 100 == 99:
+                    logger.info(f"Epoch {epoch+1}/{self.epochs} - Batch {batch_idx+1}/{min(self.max_batches, len(train_loader))} - Loss: {loss.item():.4f}")
+
             avg_loss = epoch_loss / (batch_idx + 1)
             logger.info(f"Epoch {epoch+1}/{self.epochs} - Average Loss: {avg_loss:.4f}")
 
@@ -111,10 +114,19 @@ class LlamaExperimenter:
                 end_time = time.time()
                 inference_time += (end_time - start_time)
 
-                logits = outputs.logits
+                # Causal shift
+                logits = outputs.logits[:, :-1, :]
+                labels = labels[:, 1:]
+
                 _, top_5_preds = torch.topk(logits, k=5, dim=-1)
-                top_5_correct += (top_5_preds == labels.unsqueeze(-1)).any(dim=-1).sum().item()
-                total += labels.size(0)
+
+                # Mask out padding
+                mask = labels != self.data_handler.tokenizer.pad_token_id
+                correct = (top_5_preds == labels.unsqueeze(-1)).any(dim=-1)
+
+                # Count only correct tokens if not padding token
+                top_5_correct += (correct & mask).sum().item()
+                total += mask.sum().item()
 
         accuracy = top_5_correct / total
 

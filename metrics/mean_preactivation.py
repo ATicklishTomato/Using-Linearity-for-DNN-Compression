@@ -153,7 +153,7 @@ def mean_preactivations(model, data_handler, max_batches=30, device='cuda', save
                                  desc="Registering hooks",
                                  leave=False, disable=debug_mode):
             if isinstance(module, torch.nn.BatchNorm2d):
-                hooks.append(module.register_forward_hook(lambda module, input, output, name=name: llama_hook(module, input, output, channel_sums, sample_counts, name)))
+                hooks.append(module.register_forward_hook(lambda module, input, output, name=name: resnet_hook(module, input, output, channel_sums, sample_counts, name)))
 
     logger.debug("Hooks registered. Performing forward passes...")
 
