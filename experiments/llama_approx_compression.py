@@ -40,6 +40,7 @@ def group_contiguous_layers(linear_layers):
     return groups
 
 class LinearAttentionBlock(torch.nn.Module):
+    """A simple Linear Attention Block that can be trained to mimic parts of a model that behave largely linearly"""
     def __init__(self, hidden_size):
         super().__init__()
         logger.debug(f"Initializing Linear Attention Block with hidden size {hidden_size}")
@@ -49,22 +50,36 @@ class LinearAttentionBlock(torch.nn.Module):
         return self.linear(hidden_states)
 
 class IdentityBlock(torch.nn.Module):
+    """We need a separate IdentityBlock class to ensure we can handle additional arguments from LLama forward pass"""
     def forward(self, hidden_states, **kwargs):
         return hidden_states
 
 def replace_attention_block(model, layer_group, linear_block):
+    """
+    Replace the existing attention blocks with their linear approximation.
+    Args:
+        model: The LLaMA model to modify.
+        layer_group: A list of layer indices that form a contiguous block to replace.
+        linear_block: The Linear Block to replace.
+    Returns:
+        None. Model is modified in place.
+    """
     first = layer_group[0]
 
-    # Replace whole forward pass
-    model.model.layers[first].forward = linear_block.forward
+    # Replace first layer with trained linear block
+    model.model.layers[first] = linear_block
 
-    # Disable remaining layers
+    # Replace remaining layers with identity modules
     for layer_id in layer_group[1:]:
-        model.model.layers[layer_id].forward = IdentityBlock().forward
+        model.model.layers[layer_id] = IdentityBlock()
 
-def prepare_attention_mask(attention_mask, hidden_states):
+def prepare_attention_mask(attention_mask):
     """
     Converts tokenizer attention_mask to a format LLaMA attention accepts.
+    Args:
+        attention_mask: The attention mask from the tokenizer, typically of shape (batch_size, seq_len).
+    Returns:
+        A boolean attention mask of shape (batch_size, 1, 1, seq_len) that can be used in the LLaMA attention mechanism.
     """
     # attention_mask: (batch, seq)
     # need shape: (batch, 1, 1, seq) or broadcastable
@@ -73,11 +88,21 @@ def prepare_attention_mask(attention_mask, hidden_states):
 
 @torch.no_grad()
 def get_attention_block_output(model, layer_ids, hidden_states, attention_mask):
+    """
+    Passes hidden states through the specified attention block layers to get the output for training the linear approximation.
+    Args:
+        model: The LLaMA model containing the layers.
+        layer_ids: A list of layer indices that form the attention block to mimic.
+        hidden_states: The input hidden states to the first layer in the block, typically of shape (batch_size, seq_len, hidden_size).
+        attention_mask: The attention mask from the tokenizer, typically of shape (batch_size, seq_len).
+    Returns:
+        The output hidden states after passing through the specified attention block layers, of shape (batch_size, seq_len, hidden_size).
+    """
     batch_size, seq_len, _ = hidden_states.shape
     device = hidden_states.device
 
     position_ids = torch.arange(seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
-    attn_mask = prepare_attention_mask(attention_mask, hidden_states)
+    attn_mask = prepare_attention_mask(attention_mask)
 
     for layer_id in layer_ids:
         layer = model.model.layers[layer_id]
@@ -111,6 +136,20 @@ def train_block_approximation(
     lr=2e-4,
     max_batches=200
 ):
+    """
+    Trains a linear approximation layer to mimic a section of a LLama model's attention blocks.
+    Args:
+        model: The LLaMA model to modify.
+        tokenizer: The tokenizer to use for tokenization.
+        layer_group: A list of layer indices that form a contiguous block to replace.
+        train_dataset: The training dataset.
+        device: The device to use.
+        epochs: The number of epochs to train.
+        lr: The learning rate to use.
+        max_batches: The maximum number of batches to use.
+    Returns:
+        The linear approximation layer trained to mimic the specified attention block layers.
+    """
     hidden_size = model.config.hidden_size
     approx = LinearAttentionBlock(hidden_size).to(device)
 

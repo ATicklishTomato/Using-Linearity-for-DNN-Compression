@@ -35,6 +35,15 @@ def fold_linear_conv_sequences(
     # Helper: fold BN into Conv
     # ------------------------------------------------------------
     def fold_bn_into_conv(conv, bn):
+        """
+        Fold a batchnorm layer into its own conv layer by applying its scaling and shifting to the conv weights and biases.
+        This effectively removes the batchnorm layer while preserving the same transformations.
+        Args:
+            conv (nn.Conv2d): Convolutional layer
+            bn (nn.BatchNorm2d): Batchnorm layer
+        Returns:
+            None. Convolutional layer is modified in place
+        """
         logger.debug(f"    Folding BatchNorm into Conv ({conv.out_channels} channels)")
 
         W = conv.weight
@@ -60,6 +69,14 @@ def fold_linear_conv_sequences(
     # Helper: fold Conv → Conv
     # ------------------------------------------------------------
     def fold_convs(conv1, conv2):
+        """
+        Folds to convolutional layers into each other, creating one big convolutional layer that performs the same transformations as the two in direct sequence.
+        Args:
+            conv1 (nn.Conv2d): Convolutional layer
+            conv2 (nn.Conv2d): Convolutional layer
+        Returns:
+            new_conv (nn.Conv2d): New convolutional layer that performs the same transformations.
+        """
         logger.debug(
             f"    Folding Conv layers: "
             f"{conv1.in_channels}→{conv1.out_channels}→{conv2.out_channels}"
@@ -248,10 +265,10 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
             "original_accuracy": original_accuracy,
             "original_param_count": original_param_count,
             "original_inference_time": original_inference_time,
-            "folded_accuracy": folded_accuracy,
-            "folded_param_count": folded_param_count,
-            "folded_inference_time": folded_inference_time,
-            "folded_pairs": folded_pairs,
+            "compressed_accuracy": folded_accuracy,
+            "compressed_param_count": folded_param_count,
+            "compressed_inference_time": folded_inference_time,
+            "compressed_groups": folded_pairs,
         }
         with open(f"./results/{model}_folding_results.json", "w") as f:
             json.dump(results, f, indent=4)
@@ -261,10 +278,10 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         "original_accuracy": original_accuracy,
         "original_param_count": original_param_count,
         "original_inference_time": original_inference_time,
-        "folded_accuracy": folded_accuracy,
-        "folded_param_count": folded_param_count,
-        "folded_inference_time": folded_inference_time,
-        "folded_pairs": folded_pairs,
+        "compressed_accuracy": folded_accuracy,
+        "compressed_param_count": folded_param_count,
+        "compressed_inference_time": folded_inference_time,
+        "compressed_groups": folded_pairs,
     })
     logger.info("Logged results to Weights & Biases")
 
