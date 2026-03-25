@@ -163,7 +163,7 @@ def return_given_alpha(alpha, sort_res, W_metric, tmp_metric, sum_before):
     return W_mask, cur_sparsity
 
 
-def prune_wanda(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_batches=20,
+def prune(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_batches=20,
                 semistructured=False, sparsity_ratio=0.5):
     use_cache = model.config.use_cache
     model.config.use_cache = False
