@@ -4,7 +4,7 @@
 #SBATCH --output=transformer_compression_output_%j.txt
 #SBATCH --partition tue.gpu2.q
 #SBATCH --gres=gpu:l4.22gb:1
-#SBATCH --time=04:00:00
+#SBATCH --time=06:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1

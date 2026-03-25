@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch_pruning.utils import count_ops_and_params
 import logging
 
 from tqdm import tqdm
@@ -90,7 +91,13 @@ class ResNetExperimenter:
             logger.info(f"Saved finetuned model to results/{self.model_name}_finetuned.pth")
 
     def validate_model(self):
-        """Validate the ResNet model and compute accuracy, parameter count, and inference time."""
+        """Validate the ResNet model and compute accuracy, parameter count, and inference time.
+        Returns:
+            accuracy:           Top-1 accuracy of the model on the validation set.
+            param_count:        Number of parameters in the model on the validation set.
+            avg_inference_time: Average inference time of the model on the validation set.
+            tflops:             TFLOPs during inference.
+        """
         model = self.model.to(self.device).eval()
         correct = 0
         total = 0
@@ -118,4 +125,10 @@ class ResNetExperimenter:
         param_count = sum(p.numel() for p in model.parameters())
         inference_time /= total
 
-        return accuracy, param_count, inference_time
+        # Compute one more input for TFLOPs computation
+        with torch.no_grad():
+            example_input = next(iter(data_loader))
+            macs, _ = count_ops_and_params(model, example_input[0].to(self.device))
+        tflops =  2 * (macs / inference_time) / 1e12
+
+        return accuracy, param_count, inference_time, tflops

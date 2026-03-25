@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 import logging
 from transformers import LlamaForCausalLM
 from transformers.utils.logging import disable_progress_bar
+from torch_pruning.utils import count_ops_and_params
 
 from tqdm import tqdm
 
@@ -92,11 +93,19 @@ class LlamaExperimenter:
             self.data_handler.tokenizer.save_pretrained(save_path)
             logger.info(f"Finetuned model saved to {save_path}.")
 
-    def validate_model(self):
-        """Validate the LLaMA model and compute accuracy, parameter count, and average inference time."""
+    def validate_model(self, top_k=5):
+        """Validate the LLaMA model and compute accuracy, parameter count, and average inference time.
+        Args:
+            top_k (int, optional): The top k accuracy values. Defaults to 5.
+        Returns:
+            accuracy:           Top-k accuracy of the model on the validation set.
+            param_count:        Total number of parameters in the model.
+            avg_inference_time: Average inference time per token.
+            tflops:             TFLOPs during inference.
+        """
         model = self.model.to(self.device).eval()
         inference_time = 0
-        top_5_correct = 0
+        top_k_correct = 0
         total = 0
         val_loader = DataLoader(self.data_handler.val_set, batch_size=self.batch_size, shuffle=False)
         num_batches = min(self.max_batches, len(val_loader))
@@ -118,19 +127,27 @@ class LlamaExperimenter:
                 logits = outputs.logits[:, :-1, :]
                 labels = labels[:, 1:]
 
-                _, top_5_preds = torch.topk(logits, k=5, dim=-1)
+                _, top_k_preds = torch.topk(logits, k=top_k, dim=-1)
 
                 # Mask out padding
                 mask = labels != self.data_handler.tokenizer.pad_token_id
-                correct = (top_5_preds == labels.unsqueeze(-1)).any(dim=-1)
+                correct = (top_k_preds == labels.unsqueeze(-1)).any(dim=-1)
 
                 # Count only correct tokens if not padding token
-                top_5_correct += (correct & mask).sum().item()
+                top_k_correct += (correct & mask).sum().item()
                 total += mask.sum().item()
 
-        accuracy = top_5_correct / total
+        accuracy = top_k_correct / total
 
         param_count = sum(p.numel() for p in model.parameters())
         avg_inference_time = inference_time / total
 
-        return accuracy, param_count, avg_inference_time
+        # Compute one more input for TFLOPs computation
+        with torch.no_grad():
+            example_input = next(iter(val_loader))
+            example_input = self.data_handler.tokenizer(example_input['text'], return_tensors='pt', padding=True, truncation=True).to(self.device)
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                macs, _ = count_ops_and_params(model, example_input)
+        tflops = 2 * (macs / inference_time) / 1e12
+
+        return accuracy, param_count, avg_inference_time, tflops

@@ -6,6 +6,7 @@ import wandb
 from utils.data_manager import DataManager
 from utils.resnet_model import ResNetExperimenter
 from metrics.linearity_metric_manager import LinearityMetric
+import utils.util_functions as utils
 
 logger = logging.getLogger(__name__)
 
@@ -221,8 +222,9 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Evaluate initial model performance
     # ------------------------------------------------------------
-    original_accuracy, original_param_count, original_inference_time = experimenter.validate_model()
-    logger.info(f"Original model accuracy: {original_accuracy:.4f}, parameters: {original_param_count}, inference time: {original_inference_time:.4f} seconds")
+    original_accuracy, original_param_count, original_inference_time, original_tflops = experimenter.validate_model()
+    logger.info(f"Original model accuracy: {original_accuracy:.4f}, parameters: {original_param_count}, "
+                f"inference time: {original_inference_time:.4f} seconds, tflops: {original_tflops}")
 
     # ------------------------------------------------------------
     # Compute linearity scores
@@ -246,8 +248,16 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Evaluate folded model performance
     # ------------------------------------------------------------
-    folded_accuracy, folded_param_count, folded_inference_time = experimenter.validate_model()
-    logger.info(f"Folded model accuracy: {folded_accuracy:.4f}, parameters: {folded_param_count}, inference time: {folded_inference_time:.4f} seconds")
+    compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_tflops = experimenter.validate_model()
+    logger.info(f"Folded model accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, "
+                f"inference time: {compressed_inference_time:.4f} seconds, tflops: {compressed_tflops}")
+
+    accuracy_loss = utils.accuracy_loss(original_accuracy, compressed_accuracy)
+    param_compression_ratio = utils.compression_ratio(original_param_count, compressed_param_count)
+    speedup = utils.speedup(original_inference_time, compressed_inference_time)
+    tflop_reduction = utils.tflop_reduction(original_inference_time, compressed_inference_time)
+    logger.info(f"Accuracy loss: {accuracy_loss:.4f}, Parameter compression ratio: {param_compression_ratio:.4f}, "
+                f"Speedup: {speedup:.4f}x, TFLOP reduction: {tflop_reduction:.4f}")
 
     # ------------------------------------------------------------
     # Log results to wandb and save models/results if enabled
@@ -265,10 +275,14 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
             "original_accuracy": original_accuracy,
             "original_param_count": original_param_count,
             "original_inference_time": original_inference_time,
-            "compressed_accuracy": folded_accuracy,
-            "compressed_param_count": folded_param_count,
-            "compressed_inference_time": folded_inference_time,
+            "compressed_accuracy": compressed_accuracy,
+            "compressed_param_count": compressed_param_count,
+            "compressed_inference_time": compressed_inference_time,
             "compressed_groups": folded_pairs,
+            "accuracy_loss": accuracy_loss,
+            "param_compression_ratio": param_compression_ratio,
+            "speedup": speedup,
+            "tflop_reduction": tflop_reduction,
         }
         with open(f"./results/{model}_folding_results.json", "w") as f:
             json.dump(results, f, indent=4)
@@ -278,10 +292,14 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         "original_accuracy": original_accuracy,
         "original_param_count": original_param_count,
         "original_inference_time": original_inference_time,
-        "compressed_accuracy": folded_accuracy,
-        "compressed_param_count": folded_param_count,
-        "compressed_inference_time": folded_inference_time,
+        "compressed_accuracy": compressed_accuracy,
+        "compressed_param_count": compressed_param_count,
+        "compressed_inference_time": compressed_inference_time,
         "compressed_groups": folded_pairs,
+        "accuracy_loss": accuracy_loss,
+        "param_compression_ratio": param_compression_ratio,
+        "speedup": speedup,
+        "tflop_reduction": tflop_reduction,
     })
     logger.info("Logged results to Weights & Biases")
 

@@ -7,6 +7,7 @@ from transformers import LlamaForCausalLM
 from metrics.linearity_metric_manager import LinearityMetric
 from utils.data_manager import DataManager
 from utils.llama_model import LlamaExperimenter
+import utils.util_functions as utils
 
 logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
@@ -273,9 +274,10 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Evaluate initial model performance
     # ------------------------------------------------------------
-    original_accuracy, original_param_count, original_inference_time = experimenter.validate_model()
+    original_accuracy, original_param_count, original_inference_time, original_tflops = experimenter.validate_model()
     logger.info(
-        f"Original model accuracy: {original_accuracy:.4f}, parameters: {original_param_count}, inference time: {original_inference_time:.4f} seconds")
+        f"Original model accuracy: {original_accuracy:.4f}, parameters: {original_param_count}, "
+        f"inference time: {original_inference_time:.4f} seconds, TFLOPs: {original_tflops:.4f}")
 
     # ------------------------------------------------------------
     # Compute linearity scores
@@ -304,9 +306,17 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Evaluate compressed model performance
     # ------------------------------------------------------------
-    compressed_accuracy, compressed_param_count, compressed_inference_time = experimenter.validate_model()
+    compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_tflops = experimenter.validate_model()
     logger.info(
-        f"Compressed model accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, inference time: {compressed_inference_time:.4f} seconds")
+        f"Compressed model accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, "
+        f"inference time: {compressed_inference_time:.4f} seconds, TFLOPs: {compressed_tflops:.4f}")
+
+    accuracy_loss = utils.accuracy_loss(original_accuracy, compressed_accuracy)
+    param_compression_ratio = utils.compression_ratio(original_param_count, compressed_param_count)
+    speedup = utils.speedup(original_inference_time, compressed_inference_time)
+    tflop_reduction = utils.tflop_reduction(original_inference_time, compressed_inference_time)
+    logger.info(f"Accuracy loss: {accuracy_loss:.4f}, Parameter compression ratio: {param_compression_ratio:.4f}, "
+                f"Speedup: {speedup:.4f}x, TFLOP reduction: {tflop_reduction:.4f}")
 
     # ------------------------------------------------------------
     # Log results to wandb and save models/results if enabled
@@ -328,6 +338,10 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
             "compressed_param_count": compressed_param_count,
             "compressed_inference_time": compressed_inference_time,
             "compressed_groups": groups,
+            "accuracy_loss": accuracy_loss,
+            "param_compression_ratio": param_compression_ratio,
+            "speedup": speedup,
+            "tflop_reduction": tflop_reduction,
         }
         with open(f"./results/{model}_folding_results.json", "w") as f:
             json.dump(results, f, indent=4)
@@ -342,5 +356,9 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         "compressed_param_count": compressed_param_count,
         "compressed_inference_time": compressed_inference_time,
         "compressed_groups": groups,
+        "accuracy_loss": accuracy_loss,
+        "param_compression_ratio": param_compression_ratio,
+        "speedup": speedup,
+        "tflop_reduction": tflop_reduction,
     })
     logger.info("Logged results to Weights & Biases")
