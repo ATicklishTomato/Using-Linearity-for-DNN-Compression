@@ -255,7 +255,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     accuracy_loss = utils.accuracy_loss(original_accuracy, compressed_accuracy)
     param_compression_ratio = utils.compression_ratio(original_param_count, compressed_param_count)
     speedup = utils.speedup(original_inference_time, compressed_inference_time)
-    tflop_reduction = utils.tflop_reduction(original_inference_time, compressed_inference_time)
+    tflop_reduction = utils.gflop_reduction(original_inference_time, compressed_inference_time)
     logger.info(f"Accuracy loss: {accuracy_loss:.4f}, Parameter compression ratio: {param_compression_ratio:.4f}, "
                 f"Speedup: {speedup:.4f}x, TFLOP reduction: {tflop_reduction:.4f}")
 

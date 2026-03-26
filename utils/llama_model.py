@@ -94,14 +94,14 @@ class LlamaExperimenter:
             logger.info(f"Finetuned model saved to {save_path}.")
 
     def validate_model(self, top_k=5):
-        """Validate the LLaMA model and compute accuracy, parameter count, and average inference time.
+        """Validate the LLaMA model and compute accuracy, parameter count, average inference time per token, and GFLOPs.
         Args:
             top_k (int, optional): The top k accuracy values. Defaults to 5.
         Returns:
             accuracy:           Top-k accuracy of the model on the validation set.
             param_count:        Total number of parameters in the model.
             avg_inference_time: Average inference time per token.
-            tflops:             TFLOPs during inference.
+            gflops:             GFLOPs during inference.
         """
         model = self.model.to(self.device).eval()
         inference_time = 0
@@ -148,6 +148,6 @@ class LlamaExperimenter:
             example_input = self.data_handler.tokenizer(example_input['text'], return_tensors='pt', padding=True, truncation=True).to(self.device)
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 macs, _ = count_ops_and_params(model, example_input)
-        tflops = 2 * (macs / inference_time) / 1e12
+        gflops = 2 * (macs / inference_time) / 1e9  # Convert to GFLOPs
 
-        return accuracy, param_count, avg_inference_time, tflops
+        return accuracy, param_count, avg_inference_time, gflops

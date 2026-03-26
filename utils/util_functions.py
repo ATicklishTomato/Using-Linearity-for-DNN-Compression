@@ -38,15 +38,15 @@ def speedup(original_inference_time, compressed_inference_time):
         return float('inf')
     return original_inference_time / compressed_inference_time
 
-def tflop_reduction(original_tflop, compressed_tflop):
+def gflop_reduction(original_gflop, compressed_gflop):
     """
-    Compute the TFLOP reduction
+    Compute the GFLOP reduction
     Args:
-        original_tflop:   TFLOP of the original model.
-        compressed_tflop: TFLOP of the compressed model.
+        original_gflop:   GFLOP of the original model.
+        compressed_gflop: GFLOP of the compressed model.
     Returns:
-        tflop_reduction:  TFLOP reduction
+        gflop_reduction:  GFLOP reduction
     """
-    if original_tflop == 0:
+    if original_gflop == 0:
         return 0.0
-    return (original_tflop - compressed_tflop) / original_tflop
+    return (original_gflop - compressed_gflop) / original_gflop
