@@ -29,14 +29,14 @@ def parse_args():
                         default='imagenet',
                         help='Dataset to use for training and evaluation.')
     parser.add_argument('-e', '--experiment', type=str,
-                        choices=['relation', 'compression'],
+                        choices=['relation', 'compression', 'benchmark_compression'],
                         default='relation',
                         help='The type of experiment to run. "relation" tests the relation between ' +
                              'inherent linearity and another compression method. "compression" tests ' +
-                             'inherent linearity as a tool for compression.')
+                             'inherent linearity as a tool for compression. "benchmark_compression" runs other compression methods to allow a comparison.')
     parser.add_argument('--relation', type=str,
-                        choices=['wanda_unstructured_pruning', 'wanda_semi_2:4_pruning', 'wanda_semi_4:8_pruning'],
-                        default='pruning',
+                        choices=['magnitude_pruning', 'basic_kd'],
+                        default='magnitude_pruning',
                         help='The relation experiment to run. Only applicable if experiment type is "relation". Ignored otherwise.')
     parser.add_argument('-t', '--threshold', type=str,
                         default=None,
@@ -60,7 +60,7 @@ def parse_args():
                         help='Enable verbose logging.')
     parser.add_argument('--save', action='store_true',
                         help='Save the trained models and results to ./results directory.')
-    parser.add_argument('--wandb_project', type=str, default='inherent_linearity_experiments',
+    parser.add_argument('--wandb_project', type=str, default=None,
                         help='Weights & Biases project name for logging.')
     parser.add_argument('--wandb_tags',
                         type=str,
@@ -97,6 +97,12 @@ if __name__ == '__main__':
     else:
         logger.warning("No Weights and Biases API key provided.")
 
+    project_name = ""
+    if args.wandb_project:
+        project_name = args.wandb_project
+    else:
+        project_name = args.model + "_" + args.experiment
+
     wandb.init(
         project=args.wandb_project,
         config=wandb_config,
@@ -109,7 +115,7 @@ if __name__ == '__main__':
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
         torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.benchmark = True
     np.random.seed(args.seed)
     random.seed(args.seed)
 
@@ -124,6 +130,10 @@ if __name__ == '__main__':
             from experiments.resnet_fold_compression import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
                            args.epochs, args.lr, args.max_batches, args.save, args.seed, args.device)
+        case (_, 'benchmark_compression', _):
+            from experiments.benchmark_compression import benchmark_compression_methods
+            benchmark_compression_methods(args.model, args.dataset, args.batch_size, args.epochs, args.lr,
+                                          args.max_batches, args.save, args.seed, args.device)
         case _:
             logger.error("Invalid combination of model, experiment, and relation.")
             raise ValueError("Invalid combination of model, experiment, and relation.")

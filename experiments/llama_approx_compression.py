@@ -362,3 +362,4 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         "gflop_reduction": gflop_reduction,
     })
     logger.info("Logged results to Weights & Biases")
+    logger.info("Experiment completed.")
