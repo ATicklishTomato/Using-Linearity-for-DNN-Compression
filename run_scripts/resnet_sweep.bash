@@ -1,0 +1,24 @@
+#!/bin/bash
+
+#SBATCH --job-name=transformer_compression
+#SBATCH --output=transformer_compression_output_%j.txt
+#SBATCH --partition tue.gpu2.q
+#SBATCH --gres=gpu:l4.22gb:1
+#SBATCH --time=12:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=8G
+
+# Only load python because PyTorch module is garbage on this cluster
+module purge
+module load Python/3.12.3-GCCcore-13.3.0
+
+python -m venv .venv
+source .venv/bin/activate # Activate virtual environment
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Execute the script or command
+python sweep.py --max_batches 1024 --sweep_runs 10
