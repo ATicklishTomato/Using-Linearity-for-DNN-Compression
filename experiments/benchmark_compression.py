@@ -14,7 +14,8 @@ from utils.resnet_model import ResNetExperimenter
 
 logger = logging.getLogger(__name__)
 
-def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, max_batches, save, seed, device):
+def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, max_batches, save, seed, device,
+                                  pruning_ratio=0.5, blocks=None, hidden_layer_reduction=2):
     """
     Run other compression methods on a given model and dataset to compare performance against linearity-based compression.
     Args:
@@ -27,6 +28,9 @@ def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, m
         save (bool): Whether to save the trained models and results.
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
+        pruning_ratio (float): Pruning ratio for pruning (e.g., 0.5).
+        blocks: Blocks layout for the student ResNet model. Default is [2,2,2]. Ignored for Llama model.
+        hidden_layer_reduction: Number of hidden layers to remove for student Llama model. Default is 2, meaning that 18 layers of Llama-3.2-1b will become 16 layers. Ignored for ResNet model.
     """
     logger.info(f"Running benchmark compression methods for model {model_name} on dataset {dataset}.")
 
@@ -47,7 +51,8 @@ def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, m
     logger.info("Model initialized.")
 
     # Run magnitude pruning
-    prune_dict, mag_acc, mag_param, mag_infer, mag_gflops = prune(experimenter, data_handler, device=device, pruning_ratio=0.5)
+    prune_dict, mag_acc, mag_param, mag_infer, mag_gflops = prune(experimenter, data_handler, device=device,
+                                                                  pruning_ratio=pruning_ratio, max_batches=max_batches)
     logger.info(f"Magnitude pruning completed. Acc: {mag_acc}, param: {mag_param}, infer: {mag_infer}, gflops: {mag_gflops}")
 
     wandb.log({
@@ -61,7 +66,8 @@ def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, m
 
     # Run distillation
     student_model, dist_acc, dist_param, dist_infer, dist_gflops = distill(experimenter, data_handler, device=device,
-                                                               lr=lr, max_batches=max_batches)
+                                                               lr=lr, epochs=epochs, max_batches=max_batches,
+                                                               blocks=blocks, hidden_layer_reduction=hidden_layer_reduction)
     student_model.cpu()
     logger.info(f"Distillation completed. Acc: {dist_acc}, param: {dist_param}, infer: {dist_infer}, gflops: {dist_gflops}")
 

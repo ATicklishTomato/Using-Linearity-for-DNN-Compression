@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -194,7 +195,7 @@ def fold_linear_conv_sequences(
     return folded_pairs
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
-                           epochs: int, lr: float, max_batches: int, save: bool, seed: int, device: str):
+                           epochs: int, lr: float, max_batches: int, save: bool, seed: int, device: str, sweep: bool=False):
     """Run the ResNet compression experiment. Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
     Args:
         model (str): The ResNet architecture to use (e.g., 'resnet18').
@@ -208,6 +209,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         save (bool): Whether to save the trained models and results.
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
+        sweep (bool): Flag that indicates whether an additional metric should be computed to use for a W&B sweep.
     """
 
     # ------------------------------------------------------------
@@ -288,7 +290,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
             json.dump(results, f, indent=4)
         logger.info(f"Saved folded model and results to ./results/{model}_folded.pth and ./results/{model}_folding_results.json")
 
-    wandb.log({
+    logging_data = {
         "original_accuracy": original_accuracy,
         "original_param_count": original_param_count,
         "original_inference_time": original_inference_time,
@@ -300,7 +302,24 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         "param_compression_ratio": param_compression_ratio,
         "speedup": speedup,
         "tflop_reduction": tflop_reduction,
-    })
+    }
+
+    if sweep:
+        # Compute separate metrics that can all be maximized
+        accuracy_retention = compressed_accuracy / original_accuracy
+        compression_ratio = original_param_count / compressed_param_count
+        speedup = original_inference_time / compressed_inference_time
+
+        # Edit these weights as needed to balance importance of metrics
+        alpha, beta, gamma = 4, 1, 1
+
+        # Compute combined metric
+        compression_score = np.pow(accuracy_retention, alpha) * np.pow(compression_ratio, beta) * np.pow(speedup, gamma)
+
+        # Add to data
+        logging_data["compression_score"] = compression_score
+
+    wandb.log(logging_data)
     logger.info("Logged results to Weights & Biases")
     logger.info("Experiment completed.")
 

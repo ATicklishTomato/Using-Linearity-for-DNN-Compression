@@ -133,13 +133,14 @@ def evaluate_student_resnet(student_model, data_handler, device='cuda', max_batc
     return accuracy, param_count, inference_time, gflops
 
 
-def distill_student_resnet(experimenter, data_handler, device='cuda', lr=2e-5, max_batches=100, blocks=None):
+def distill_student_resnet(experimenter, data_handler, device='cuda', lr=2e-5, epochs=5, max_batches=100, blocks=None):
     """Distill a student ResNet model from a teacher ResNet model.
     Args:
         experimenter: Experimenter object
         data_handler: DataHandler object
         device: torch.device
         lr: learning rate
+        epochs: number of epochs
         max_batches: maximum number of batches
         blocks: The blocks list to be passed to ResNet constructor. Default is None, gets set to [2,2,2], aka one block of 2 less than ResNet-18
     Returns:
@@ -155,7 +156,7 @@ def distill_student_resnet(experimenter, data_handler, device='cuda', lr=2e-5, m
 
     train_student_resnet(teacher_model, student_model, data_handler,
                          torch.optim.Adam(student_model.parameters(), lr=lr),
-                         device=device, max_batches=max_batches)
+                         device=device, epochs=epochs, max_batches=max_batches)
 
     accuracy, param_count, inference_time, gflops = evaluate_student_resnet(student_model, data_handler,
                                                                             device=device, max_batches=max_batches)
@@ -297,7 +298,7 @@ def evaluate_student_llama(student_model, data_handler, device='cuda', max_batch
 
     return accuracy, param_count, avg_inference_time, gflops
 
-def distill_student_llama(experimenter, data_handler, device='cuda', lr=2e-5, max_batches=100,
+def distill_student_llama(experimenter, data_handler, device='cuda', lr=2e-5, epochs=5, max_batches=100,
                           hidden_layer_reduction=2, top_k=5):
     """Evaluate a student Llama model from a teacher Llama model.
     Args:
@@ -305,6 +306,7 @@ def distill_student_llama(experimenter, data_handler, device='cuda', lr=2e-5, ma
         data_handler: DataManager object for the Llama model.
         device: torch.device
         lr: learning rate
+        epochs: number of epochs
         max_batches: maximum number of batches
         hidden_layer_reduction: number of hidden layers to remove for student Llama model.
         top_k: number of top k to check accuracy
@@ -320,22 +322,26 @@ def distill_student_llama(experimenter, data_handler, device='cuda', lr=2e-5, ma
 
     train_student_llama(teacher_model, student_model, data_handler,
                          torch.optim.Adam(student_model.parameters(), lr=lr),
-                         device=device, epochs=5, max_batches=max_batches)
+                         device=device, epochs=epochs, max_batches=max_batches)
 
     accuracy, param_count, inference_time, gflops = evaluate_student_llama(student_model, data_handler, device=device,
                                                                            max_batches=max_batches, top_k=top_k)
 
     return student_model, accuracy, param_count, inference_time, gflops
 
-def distill(experimenter, data_handler, device='cuda', lr=2e-5, max_batches=100, top_k=5):
+def distill(experimenter, data_handler, device='cuda', lr=2e-5, epochs=5, max_batches=100, top_k=5, blocks=None,
+            hidden_layer_reduction=2):
     """Wrapper for the two distillation functions. Relevant function is determined based on model_name in experimenter.
     Args:
         experimenter: LlamaExperimenter object or ResNetExperimenter object with the teacher model.
         data_handler: DataManager object for the Llama model or ResNet model.
         device: torch.device
         lr: learning rate
+        epochs: number of epochs
         max_batches: maximum number of batches
         top_k: number of top k to check accuracy. Only used for Llama model.
+        blocks: Blocks layout for the student ResNet model. Default is [2,2,2]. Ignored for Llama model.
+        hidden_layer_reduction: Number of hidden layers to remove for student Llama model. Default is 2, meaning that 18 layers of Llama-3.2-1b will become 16 layers. Ignored for ResNet model.
     Returns:
         student_model: student Llama model or student ResNet model trained and evaluated.
         accuracy: Top-k accuracy of the Llama model or Top-1 accuracy of the ResNet model on the validation set.
@@ -344,8 +350,8 @@ def distill(experimenter, data_handler, device='cuda', lr=2e-5, max_batches=100,
         gflops: GFLOPs of the model on the validation set.
     """
     if "resnet" in experimenter.model_name:
-        distill_student_resnet(experimenter, data_handler, device=device, lr=lr, max_batches=max_batches)
+        distill_student_resnet(experimenter, data_handler, device=device, lr=lr, epochs=epochs, max_batches=max_batches)
     elif "llama" in experimenter.model_name:
-        distill_student_llama(experimenter, data_handler, device=device, lr=lr, max_batches=max_batches, top_k=top_k)
+        distill_student_llama(experimenter, data_handler, device=device, lr=lr, epochs=epochs, max_batches=max_batches, top_k=top_k)
     else:
         raise ValueError(f"Unknown model name: {experimenter.model_name}")

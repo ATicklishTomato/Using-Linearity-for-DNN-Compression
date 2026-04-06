@@ -41,7 +41,7 @@ def parse_args():
     parser.add_argument('-t', '--threshold', type=str,
                         default=None,
                         help='The threshold to use for determining what is(n\'t) linear. To take a percentile, ' +
-                             'enter a percentage, e.g. \'75%\' to consider anything smaller the 75th percentile as non-linear. ' +
+                             'enter a percentage, e.g. \'75%%\' to consider anything smaller the 75th percentile as non-linear. ' +
                              'To take a hard threshold, enter a floating point value, e.g. \'-0.01\'. Default is 75th percentile.')
     parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size for training and evaluation.')
