@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#SBATCH --job-name=transformer_compression
-#SBATCH --output=transformer_compression_output_%j.txt
-#SBATCH --partition tue.gpu2.q
+#SBATCH --job-name=cnn_compression
+#SBATCH --output=cnn_compression_output_%j.txt
+#SBATCH --partition tue.gpu.q
 #SBATCH --gres=gpu:l4.22gb:1
 #SBATCH --time=06:00:00
 #SBATCH --nodes=1

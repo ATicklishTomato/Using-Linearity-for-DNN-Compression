@@ -62,12 +62,12 @@ def sweep_train(config_defaults=None):
     if "llama" in generic_args.model:
         from experiments.llama_approx_compression import run_experiment
         run_experiment(generic_args.model, generic_args.linearity, generic_args.dataset, wandb.config.threshold,
-                       wandb.config.batch_size, generic_args.epochs, wandb.config.lr, generic_args.max_batches,
+                       generic_args.batch_size, generic_args.epochs, generic_args.lr, generic_args.max_batches,
                        False, generic_args.seed, generic_args.device, sweep=True)
     elif "resnet" in generic_args.model:
         from experiments.resnet_fold_compression import run_experiment
         run_experiment(generic_args.model, generic_args.linearity, generic_args.dataset, wandb.config.threshold,
-                       wandb.config.batch_size, generic_args.epochs, wandb.config.lr, generic_args.max_batches,
+                       generic_args.batch_size, generic_args.epochs, generic_args.lr, generic_args.max_batches,
                        False, generic_args.seed, generic_args.device, sweep=True)
     else:
         raise ValueError("Unknown model type.")
@@ -85,7 +85,7 @@ if __name__ == '__main__':
 
     if os.path.exists('wandb.login'):
         with open('wandb.login', 'r') as f:
-            wandb.login(key=f.read())
+            os.environ['WANDB_API_KEY'] = f.read().strip()
     else:
         logger.warning("No Weights and Biases API key provided.")
 
@@ -106,7 +106,7 @@ if __name__ == '__main__':
         }
     }
 
-    sweep_id = wandb.sweep(sweep_config, project=project_name)
+    sweep_id = wandb.sweep(sweep_config, entity="linearity-thesis", project=project_name)
     wandb.agent(sweep_id, function=sweep_train, count=args.sweep_runs)
     wandb.finish()
     logger.info("Sweep complete. Logs saved in sweep.log")

@@ -93,7 +93,7 @@ if __name__ == '__main__':
 
     if os.path.exists('wandb.login'):
         with open('wandb.login', 'r') as f:
-            wandb.login(key=f.read())
+            os.environ['WANDB_API_KEY'] = f.read().strip()
     else:
         logger.warning("No Weights and Biases API key provided.")
 
@@ -104,6 +104,7 @@ if __name__ == '__main__':
         project_name = args.model + "_" + args.experiment
 
     wandb.init(
+        entity="linearity-thesis",
         project=args.wandb_project,
         config=wandb_config,
         tags=args.wandb_tags

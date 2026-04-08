@@ -15,7 +15,7 @@ from utils.resnet_model import ResNetExperimenter
 logger = logging.getLogger(__name__)
 
 def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, max_batches, save, seed, device,
-                                  pruning_ratio=0.5, blocks=None, hidden_layer_reduction=2):
+                                  pruning_ratio=0.5, blocks=None, hidden_layer_reduction=2, return_for_relation=False):
     """
     Run other compression methods on a given model and dataset to compare performance against linearity-based compression.
     Args:
@@ -31,6 +31,9 @@ def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, m
         pruning_ratio (float): Pruning ratio for pruning (e.g., 0.5).
         blocks: Blocks layout for the student ResNet model. Default is [2,2,2]. Ignored for Llama model.
         hidden_layer_reduction: Number of hidden layers to remove for student Llama model. Default is 2, meaning that 18 layers of Llama-3.2-1b will become 16 layers. Ignored for ResNet model.
+        return_for_relation (bool): Whether to return the pruning ratios and student networks for relation analysis. Default is False.
+    Returns:
+        None if return_for_relation is False, otherwise a dictionary containing the pruning ratios and student networks for relation analysis.
     """
     logger.info(f"Running benchmark compression methods for model {model_name} on dataset {dataset}.")
 
@@ -106,4 +109,11 @@ def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, m
         logger.info(f"Saved results to ./results/{model_name}_compression_benchmark_results.json")
 
     logger.info("Benchmark completed.")
+
+    if return_for_relation:
+        return {
+            "magnitude_pruning": prune_dict,
+            "classic_distillation": student_model,
+        }
+    return None
 
