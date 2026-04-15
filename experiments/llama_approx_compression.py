@@ -206,7 +206,7 @@ def train_block_approximation(
 
 
 def train_approximation_layers(experimenter, data_handler, groups, save_model: bool,
-                               epochs: int, lr: float, max_batches: int, device: str):
+                               epochs: int, lr: float, max_batches: int, device: str, save_path: str = None):
     """Train linear approximations for specified layer groups in the model.
     Args:
         experimenter: The LlamaExperimenter instance containing the model to be compressed and its tokenizer.
@@ -217,11 +217,13 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
         lr (float): Learning rate for training.
         max_batches (int): Maximum number of batches to process during training.
         device (str): The device to run the training on (e.g., 'cuda' or 'cpu').
+        save_path (str): Path to save the compressed model to disk.
     Returns:
         The compressed model with linear approximations.
     """
-
-    if not os.path.exists(f"./results/compressed_{experimenter.model_name}"):
+    if save_path is None:
+        save_path = "./results"
+    if not os.path.exists(f"{save_path}/compressed_{experimenter.model_name}"):
         for layer_group in groups:
             logger.info(f"Training approximation for layer group: {layer_group}")
             linear_block = train_block_approximation(
@@ -238,11 +240,11 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
 
         if save_model:
             # Save the compressed model
-            experimenter.model.save_pretrained(f"./results/compressed_{experimenter.model_name}")
-            logger.info(f"Compressed model saved to ./results/compressed_{experimenter.model_name}")
+            experimenter.model.save_pretrained(f"{save_path}/compressed_{experimenter.model_name}")
+            logger.info(f"Compressed model saved to {save_path}/compressed_{experimenter.model_name}")
     else:
-        experimenter.model = LlamaForCausalLM.from_pretrained(f"./results/compressed_{experimenter.model_name}").to(device)
-        logger.info(f"Compressed model loaded from ./results/compressed_{experimenter.model_name}")
+        experimenter.model = LlamaForCausalLM.from_pretrained(f"{save_path}/compressed_{experimenter.model_name}").to(device)
+        logger.info(f"Compressed model loaded from {save_path}/compressed_{experimenter.model_name}")
 
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
@@ -262,6 +264,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
         sweep (bool): Flag that indicates whether an additional metric should be computed to use for a W&B sweep.
     """
+    save_dir = "./results/rq1/" + threshold.split(".")[1].split("%")[0] + "/llama/" + dataset
 
     # ------------------------------------------------------------
     # Load data and model
@@ -297,7 +300,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     groups = group_contiguous_layers(linear_layers)
     train_approximation_layers(experimenter, data_handler, groups, save_model=save,
-                               epochs=epochs, lr=lr, max_batches=max_batches, device=device)
+                               epochs=epochs, lr=lr, max_batches=max_batches, device=device, save_path=save_dir)
     logger.info("Linear approximation layers trained and integrated into the model.")
 
     # ------------------------------------------------------------
@@ -326,10 +329,10 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     if save:
         import os
         import json
-        os.makedirs("./results", exist_ok=True)
+        os.makedirs(save_dir, exist_ok=True)
 
         # Save compressed model
-        torch.save(experimenter.model.state_dict(), f"./results/{model}_compressed.pth")
+        torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_compressed.pth")
 
         # Save results
         results = {
@@ -345,10 +348,10 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
             "speedup": speedup,
             "gflop_reduction": gflop_reduction,
         }
-        with open(f"./results/{model}_folding_results.json", "w") as f:
+        with open(f"{save_dir}/{model}_folding_results.json", "w") as f:
             json.dump(results, f, indent=4)
         logger.info(
-            f"Saved compressed model and results to ./results/{model}_compressed.pth and ./results/{model}_folding_results.json")
+            f"Saved compressed model and results to {save_dir}/{model}_compressed.pth and {save_dir}/{model}_folding_results.json")
 
     logging_data = {
         "original_accuracy": original_accuracy,

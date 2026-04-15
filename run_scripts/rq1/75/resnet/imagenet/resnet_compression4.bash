@@ -1,10 +1,10 @@
 #!/bin/bash
 
-#SBATCH --job-name=resnet_sweep
-#SBATCH --output=resnet_sweep_output_%j.txt
+#SBATCH --job-name=resnet_compression4
+#SBATCH --output=resnet_compression4_output_%j.txt
 #SBATCH --partition tue.gpu.q
 #SBATCH --gres=gpu:l4.22gb:1
-#SBATCH --time=10:00:00
+#SBATCH --time=08:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
@@ -21,4 +21,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python sweep.py --max_batches 512 --sweep_runs 10
+python main.py -m resnet18 -d imagenet -e compression --max_batches 1024 --threshold "75%" --seed 1843 --save

@@ -267,10 +267,11 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     if save:
         import os
         import json
-        os.makedirs("./results", exist_ok=True)
+        dir = "./results/rq1/" + threshold.split(".")[1].split("%")[0] + "/resnet/" + dataset
+        os.makedirs(dir, exist_ok=True)
 
         # Save folded model
-        torch.save(experimenter.model.state_dict(), f"./results/{model}_folded.pth")
+        torch.save(experimenter.model.state_dict(), f"{dir}/{model}_folded.pth")
 
         # Save results
         results = {
@@ -286,9 +287,9 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
             "speedup": speedup,
             "tflop_reduction": tflop_reduction,
         }
-        with open(f"./results/{model}_folding_results.json", "w") as f:
+        with open(f"{dir}/{model}_folding_results.json", "w") as f:
             json.dump(results, f, indent=4)
-        logger.info(f"Saved folded model and results to ./results/{model}_folded.pth and ./results/{model}_folding_results.json")
+        logger.info(f"Saved folded model and results to {dir}/{model}_folded.pth and {dir}/{model}_folding_results.json")
 
     logging_data = {
         "original_accuracy": original_accuracy,
