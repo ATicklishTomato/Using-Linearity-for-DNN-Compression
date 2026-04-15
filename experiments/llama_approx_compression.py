@@ -264,7 +264,8 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
         sweep (bool): Flag that indicates whether an additional metric should be computed to use for a W&B sweep.
     """
-    save_dir = "./results/rq1/" + threshold.split(".")[1].split("%")[0] + "/llama/" + dataset
+    save_dir = "./results/rq1/" + threshold.split(".")[-1].split("%")[0] + "/llama/" + dataset + "/" + str(seed)
+    os.makedirs(save_dir, exist_ok=True)
 
     # ------------------------------------------------------------
     # Load data and model
@@ -273,8 +274,12 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         f"Running Llama compression experiment with model: {model}, linearity metric: {linearity}, dataset: {dataset}, threshold: {threshold}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, max batches: {max_batches}, save results: {save}, seed: {seed}, device: {device}")
     data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, model_name=model, reduction_fraction=0.1, seed=seed) # Reduction fraction is set to 0.1 for faster experimentation, can be adjusted as needed
     logger.debug(f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
-    experimenter = LlamaExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, max_batches=max_batches, device=device, save=save)
+    experimenter = LlamaExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, max_batches=max_batches, device=device)
     logger.info("Model initialized.")
+    if save:
+        # Save original finetuned model
+        experimenter.model.save_pretrained(f"{save_dir}/original_{model}")
+        logger.info(f"Original finetuned model saved to {save_dir}/original_{model}")
 
     # ------------------------------------------------------------
     # Evaluate initial model performance
@@ -287,7 +292,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Compute linearity scores
     # ------------------------------------------------------------
-    metric = LinearityMetric(linearity, model, data_handler, threshold, max_batches, device, save)
+    metric = LinearityMetric(linearity, model, data_handler, threshold, max_batches, device, save, save_dir)
     linearity_scores = metric.metric_fn(experimenter.model)
     logger.info("Linearity scores computed.")
     logger.debug(f"Linearity scores: {linearity_scores}")
@@ -327,12 +332,11 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # Log results to wandb and save models/results if enabled
     # ------------------------------------------------------------
     if save:
-        import os
         import json
-        os.makedirs(save_dir, exist_ok=True)
 
         # Save compressed model
-        torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_compressed.pth")
+        experimenter.model.save_pretrained(f"{save_dir}/compressed_{model}")
+        logger.info(f"Compressed model saved to {save_dir}/compressed_{model}")
 
         # Save results
         results = {

@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -211,6 +213,8 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
         sweep (bool): Flag that indicates whether an additional metric should be computed to use for a W&B sweep.
     """
+    save_dir = "./results/rq1/" + threshold.split(".")[-1].split("%")[0] + "/resnet/" + dataset + "/" + str(seed)
+    os.makedirs(save_dir, exist_ok=True)
 
     # ------------------------------------------------------------
     # Load data and model
@@ -218,8 +222,12 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     logger.info(f"Running ResNet compression experiment with model={model}, linearity={linearity}, dataset={dataset}, threshold={threshold}, batch_size={batch_size}, epochs={epochs}, lr={lr}, max_batches={max_batches}, save={save}, seed={seed}, device={device}")
     data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, reduction_fraction=0.1, seed=seed) # Reduce to 10% for faster experimentation
     logger.debug(f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
-    experimenter = ResNetExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, max_batches=max_batches, device=device, save=save)
+    experimenter = ResNetExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, max_batches=max_batches, device=device)
     logger.info("Model and data loaded, model fine-tuned.")
+    if save:
+        # Save finetuned original
+        torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_original.pth")
+        logger.info(f"Saved finetuned original model to {save_dir}/{model}_original.pth")
 
     # ------------------------------------------------------------
     # Evaluate initial model performance
@@ -231,7 +239,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Compute linearity scores
     # ------------------------------------------------------------
-    metric = LinearityMetric(linearity, model, data_handler, threshold, max_batches, device, save)
+    metric = LinearityMetric(linearity, model, data_handler, threshold, max_batches, device, save, save_dir)
     linearity_scores = metric.metric_fn(experimenter.model)
     logger.info("Linearity scores computed.")
     logger.debug(f"Linearity scores: {linearity_scores}")
@@ -265,13 +273,10 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # Log results to wandb and save models/results if enabled
     # ------------------------------------------------------------
     if save:
-        import os
         import json
-        dir = "./results/rq1/" + threshold.split(".")[1].split("%")[0] + "/resnet/" + dataset
-        os.makedirs(dir, exist_ok=True)
 
         # Save folded model
-        torch.save(experimenter.model.state_dict(), f"{dir}/{model}_folded.pth")
+        torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_folded.pth")
 
         # Save results
         results = {
@@ -287,9 +292,9 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
             "speedup": speedup,
             "tflop_reduction": tflop_reduction,
         }
-        with open(f"{dir}/{model}_folding_results.json", "w") as f:
+        with open(f"{save_dir}/{model}_folding_results.json", "w") as f:
             json.dump(results, f, indent=4)
-        logger.info(f"Saved folded model and results to {dir}/{model}_folded.pth and {dir}/{model}_folding_results.json")
+        logger.info(f"Saved folded model and results to {save_dir}/{model}_folded.pth and {save_dir}/{model}_folding_results.json")
 
     logging_data = {
         "original_accuracy": original_accuracy,

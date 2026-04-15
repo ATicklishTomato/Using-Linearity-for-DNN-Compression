@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 class LinearityMetric:
 
-    def __init__(self, metric_name: str, model_name: str, data_handler, threshold, max_batches=None, device='cuda', save=False):
+    def __init__(self, metric_name: str, model_name: str, data_handler, threshold, max_batches=None, device='cuda', save=False, save_dir="./results"):
         """Encapsulating class that manages the application of the correct metric implementation for a model.
 
         Args:
@@ -17,6 +17,7 @@ class LinearityMetric:
             max_batches: Maximum number of batches to process during metric computation. If None, process all batches.
             device: Device to run the computations on (e.g., "cpu", "cuda").
             save: Whether to save the computed metric values to disk for faster loading in future runs. If True, the metric values will be saved to a file named `./results/{metric_name}_{model_name}.pt`. If such a file exists, the metric values will be loaded from the file instead of recomputing them.
+            save_dir: Directory to save the computed metric values to (e.g., `./results`).
         """
 
         self.metric_name = metric_name
@@ -26,12 +27,13 @@ class LinearityMetric:
         self.max_batches = max_batches if max_batches is not None else len(data_handler.val_set)
         self.device = device
         self.save = save
+        self.save_dir = save_dir
 
         match (model_name, metric_name):
             case (_, "mean_preactivation"):
                 self.metric_fn = lambda model: mean_preactivations(model, self.data_handler,
                                                                          max_batches=self.max_batches,
-                                                                         device=self.device, save=self.save)
+                                                                         device=self.device, save=self.save, save_dir=self.save_dir)
             case ("llama-2-7b" | "llama-2-13b" | "llama-3-1b" | "llama-3-3b", "procrustes"):
                 raise NotImplementedError("Procrustes metric not implemented for Llama yet.")
             case ("llama-2-7b" | "llama-2-13b" | "llama-3-1b" | "llama-3-3b", "fraction"):

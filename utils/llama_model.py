@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 class LlamaExperimenter:
-    def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, max_batches=None, device='cuda', save=False):
+    def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, max_batches=None, device='cuda'):
         self.model_name = model_name
         self.data_handler = data_handler
         self.batch_size = batch_size
@@ -22,7 +22,6 @@ class LlamaExperimenter:
         self.learning_rate = learning_rate
         self.max_batches = max_batches if max_batches is not None else len(data_handler.train_set)
         self.device = device
-        self.save = save
 
         match model_name:
             case "llama-2-7b":
@@ -86,13 +85,6 @@ class LlamaExperimenter:
 
         logger.info("Finetuning of LLaMA model completed.")
 
-        if self.save:
-            timestamp = time.strftime("%Y%m%d-%H%M%S")
-            save_path = f"finetuned_{self.model_name}_{timestamp}"
-            self.model.save_pretrained(save_path)
-            self.data_handler.tokenizer.save_pretrained(save_path)
-            logger.info(f"Finetuned model saved to {save_path}.")
-
     def validate_model(self, top_k=5):
         """Validate the LLaMA model and compute accuracy, parameter count, average inference time per token, and GFLOPs.
         Args:
@@ -144,10 +136,19 @@ class LlamaExperimenter:
 
         # Compute one more input for TFLOPs computation
         with torch.no_grad():
-            example_input = next(iter(val_loader))
-            example_input = self.data_handler.tokenizer(example_input['text'], return_tensors='pt', padding=True, truncation=True).to(self.device)
+            batch = next(iter(val_loader))
+
+            encoded = self.data_handler.tokenizer(
+                batch['text'],
+                return_tensors='pt',
+                padding=True,
+                truncation=True
+            ).to(self.device)
+
+            inputs = (encoded["input_ids"], encoded["attention_mask"])
+
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                macs, _ = count_ops_and_params(model, example_input)
+                macs, _ = count_ops_and_params(model, inputs)
         gflops = 2 * (macs / inference_time) / 1e9  # Convert to GFLOPs
 
         return accuracy, param_count, avg_inference_time, gflops

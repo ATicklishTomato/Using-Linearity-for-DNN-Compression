@@ -105,7 +105,7 @@ if __name__ == '__main__':
 
     wandb.init(
         entity="linearity-thesis",
-        project=args.wandb_project,
+        project=project_name,
         config=wandb_config,
         tags=args.wandb_tags
     )

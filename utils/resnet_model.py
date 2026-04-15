@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 class ResNetExperimenter:
-    def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, max_batches=None, device='cuda', save=False):
+    def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, max_batches=None, device='cuda'):
         self.model_name = model_name
         self.data_handler = data_handler
         self.batch_size = batch_size
@@ -22,7 +22,6 @@ class ResNetExperimenter:
         self.learning_rate = learning_rate
         self.max_batches = max_batches if max_batches is not None else len(data_handler.train_set)
         self.device = device
-        self.save = save
 
         match model_name:
             case "resnet18":
@@ -85,10 +84,6 @@ class ResNetExperimenter:
             logger.info(f"Epoch {epoch + 1} completed. Average Loss: {avg_loss:.4f}")
 
         logger.info("Finished finetuning the ResNet model.")
-
-        if self.save:
-            torch.save(self.model.state_dict(), f"./results/{self.model_name}_finetuned.pth")
-            logger.info(f"Saved finetuned model to results/{self.model_name}_finetuned.pth")
 
     def validate_model(self):
         """Validate the ResNet model and compute accuracy, parameter count, inference time, and GFLOPs.

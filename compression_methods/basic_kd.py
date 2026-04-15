@@ -44,7 +44,7 @@ class ForwardKLLoss(torch.nn.Module):
 
 def get_student_resnet(blocks=None, block=models.resnet.BasicBlock):
     if blocks is None:
-        blocks = [2, 2, 2]
+        blocks = [2, 2, 1, 1]
 
     model = models.resnet.ResNet(block, blocks)
 
@@ -52,8 +52,8 @@ def get_student_resnet(blocks=None, block=models.resnet.BasicBlock):
 
 
 def train_student_resnet(teacher_model, student_model, data_handler, optimizer, device='cuda', epochs=5, max_batches=100):
-    teacher_model.eval()
-    student_model.train()
+    teacher_model.to(device).eval()
+    student_model.to(device).train()
 
     criterion = ForwardKLLoss()
     train_loader = DataLoader(data_handler.train_set, batch_size=data_handler.batch_size, shuffle=True)
@@ -161,7 +161,7 @@ def distill_student_resnet(experimenter, data_handler, device='cuda', lr=2e-5, e
     accuracy, param_count, inference_time, gflops = evaluate_student_resnet(student_model, data_handler,
                                                                             device=device, max_batches=max_batches)
 
-    return student_model, accuracy, param_count,inference_time, gflops
+    return student_model, accuracy, param_count, inference_time, gflops
 
 def get_student_llama(parent_model, hidden_layer_reduction=2):
     """Get student Llama model from LLAMA model.
@@ -350,8 +350,8 @@ def distill(experimenter, data_handler, device='cuda', lr=2e-5, epochs=5, max_ba
         gflops: GFLOPs of the model on the validation set.
     """
     if "resnet" in experimenter.model_name:
-        distill_student_resnet(experimenter, data_handler, device=device, lr=lr, epochs=epochs, max_batches=max_batches)
+        return distill_student_resnet(experimenter, data_handler, device=device, lr=lr, epochs=epochs, max_batches=max_batches)
     elif "llama" in experimenter.model_name:
-        distill_student_llama(experimenter, data_handler, device=device, lr=lr, epochs=epochs, max_batches=max_batches, top_k=top_k)
+        return distill_student_llama(experimenter, data_handler, device=device, lr=lr, epochs=epochs, max_batches=max_batches, top_k=top_k)
     else:
         raise ValueError(f"Unknown model name: {experimenter.model_name}")

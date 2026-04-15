@@ -3,7 +3,7 @@ from copy import deepcopy
 
 import torch
 import torch_pruning as tp
-from torch import nn
+from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch_pruning.utils import count_ops_and_params
 from tqdm import tqdm
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 
-def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, max_batches=100):
+def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, max_batches=100, lr=2e-5, batch_size=64, epochs=10):
     """
     Wrapper function for pruning models based on their architecture.
     Args:
@@ -22,6 +22,9 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, max_batc
         device:         Device to use.
         pruning_ratio:  Pruning ratio.
         max_batches:   Maximum number of batches to prune.
+        lr:            Learning rate to use.
+        batch_size:   Batch size to use.
+        epochs:        Number of epochs to use.
     Returns:
         dict: A dictionary containing the pruning ratios for each layer.
         accuracy: Accuracy of the pruned model.
@@ -35,11 +38,13 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, max_batc
         logger.info("Running ResNet pruning")
         prune_dict = prune_resnet(model, data_handler, device, pruning_ratio)
         logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
+        finetune_resnet(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device, max_batches=max_batches)
         acc, param_count, inference_time, gflops = evaluate_resnet(model, data_handler, device, max_batches)
     else:
         logger.info("Running Llama pruning")
         prune_dict = prune_llama(model, data_handler, device, pruning_ratio)
         logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
+        finetune_llama(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device, max_batches=max_batches)
         acc, param_count, inference_time, gflops = evaluate_llama(model, data_handler)
 
     logger.info("Completed pruning evaluation")
@@ -57,7 +62,7 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
         dict: A dictionary containing the pruning ratios for each layer.
     """
 
-    model.cpu().eval()
+    model.to(device).eval()
     ignored_layers = []
     for p in model.parameters():
         p.requires_grad_(True)
@@ -65,9 +70,9 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
         if isinstance(m, nn.Linear) and m.out_features == 1000:
             ignored_layers.append(m)
 
-    example_inputs = torch.rand(data_handler.train_set[0][0].shape).to(device)
+    example_inputs = torch.rand((1, *data_handler.train_set[0][0].shape)).to(device)
     importance = tp.importance.GroupMagnitudeImportance(p=1)
-    pruner = tp.pruner.GroupNormPruner(
+    pruner = tp.pruner.MagnitudePruner(
         model,
         example_inputs=example_inputs,
         importance=importance,
@@ -82,13 +87,13 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
 
     # Store parameter counts per layer before pruning to compare to pruned later
     original_param_counts = {}
-    for module in model.modules():
+    for name, module in model.named_modules():
         if module not in pruner.ignored_layers:
             # logger.info(module)
             if isinstance(module, nn.Conv2d):
-                original_param_counts[module] = module.out_channels
+                original_param_counts[name] = module.out_channels
             elif isinstance(module, nn.Linear):
-                original_param_counts[module] = module.out_features
+                original_param_counts[name] = module.out_features
 
 
     layer_channel_cfg = {}
@@ -113,18 +118,52 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
 
     # Get pruned ratios per layer
     pruned_param_counts = {}
-    for module in model.modules():
+    for name, module in model.named_modules():
         if module not in pruner.ignored_layers:
             if isinstance(module, nn.Conv2d):
-                pruned_param_counts[module] = module.out_channels
+                pruned_param_counts[name] = module.out_channels
             elif isinstance(module, nn.Linear):
-                pruned_param_counts[module] = module.out_features
+                pruned_param_counts[name] = module.out_features
 
     pruned_ratios = {}
     for name, original_param_count in original_param_counts.items():
-        pruned_ratios[name] = original_param_count / pruned_param_counts[name]
+        pruned_ratios[name] = pruned_param_counts[name] / original_param_count
 
     return pruned_ratios
+
+def finetune_resnet(model, data_handler, lr=2e-5, batch_size=64, epochs=10, device='cuda', max_batches=100):
+    """Finetune the ResNet model such that it can be used for linearity metric evaluations."""
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    train_loader = DataLoader(data_handler.train_set, batch_size=batch_size, shuffle=True)
+
+    model.train()
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        i = 0
+        for i, data in tqdm(enumerate(train_loader), total=min(len(train_loader), max_batches),
+                            desc=f"Finetuning Epoch {epoch + 1}/{epochs}", leave=False, disable=debug_mode):
+            if i >= max_batches:
+                break
+            inputs, labels = data
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            optimizer.zero_grad()
+
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            epoch_loss += loss.item()
+            if i % 100 == 99:  # Print every 100 mini-batches
+                logger.info(f"[Epoch {epoch + 1}, Batch {i + 1}] loss: {loss.item():.4f}")
+
+        avg_loss = epoch_loss / (i + 1)
+        logger.info(f"Epoch {epoch + 1} completed. Average Loss: {avg_loss:.4f}")
+
+    logger.info("Finished finetuning the ResNet model.")
 
 def evaluate_resnet(model, data_handler, device='cuda', max_batches=100):
         """Validate the ResNet model and compute accuracy, parameter count, inference time, and GFLOPs.
@@ -185,9 +224,15 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
     Returns:
         dict: A dictionary containing the pruning ratios for each layer.
     """
-    tp.utils.print_tool.before_pruning(model)
-    text = data_handler.train_set[0]['text']
-    inputs = torch.tensor(data_handler.tokenizer.encode(text)).unsqueeze(0).to(device)
+    # tp.utils.print_tool.before_pruning(model)
+    encoded = data_handler.tokenizer(
+        data_handler.train_set[0]['text'],
+        return_tensors="pt",
+        truncation=True,
+        max_length=16,
+    ).to(device)
+
+    inputs = encoded["input_ids"]
     num_heads = {}
     out_channel_groups = {}
     seperate_qkv = False
@@ -210,7 +255,7 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
     hidden_size_pruning_ratio = pruning_ratio
     importance = tp.importance.GroupMagnitudeImportance(p=2,
                                                         group_reduction='mean')  # tp.importance.ActivationImportance(p=2, target_types=[torch.nn.Linear])
-    pruner = tp.pruner.BasePruner(
+    pruner = tp.pruner.MagnitudePruner(
         model,
         example_inputs=inputs,
         importance=importance,
@@ -275,7 +320,7 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
 
     if not _is_gqa:
         model.config.num_key_value_heads = model.config.num_attention_heads
-    tp.utils.print_tool.after_pruning(model, do_print=True)
+    # tp.utils.print_tool.after_pruning(model, do_print=True)
     logger.info(model.config)
 
     # Get pruned ratios per layer
@@ -296,12 +341,55 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
 
     pruned_ratios = {}
     for name, original_param_count in original_param_counts.items():
-        pruned_ratios[name] = pruned_param_counts[name]/original_param_count
+        pruned_ratios[name] = pruned_param_counts[name] / original_param_count
 
     torch.cuda.empty_cache()
     model.eval()
 
     return pruned_ratios
+
+def finetune_llama(model, data_handler, lr=2e-5, batch_size=4, epochs=10, device='cuda', max_batches=100):
+    """Finetune the LLaMA model such that it can be used for linearity metric evaluations."""
+
+    model.to(device).train()
+
+    optimizer = optim.AdamW(model.parameters(), lr=lr)
+
+    train_loader = DataLoader(data_handler.train_set, batch_size=batch_size, shuffle=True)
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        batch_idx = 0
+        for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}",
+                                               total=min(max_batches, len(train_loader)), leave=False,
+                                               disable=debug_mode)):
+            if batch_idx >= max_batches:
+                break
+
+            optimizer.zero_grad()
+
+            inputs = data_handler.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(
+                device)
+            labels = inputs.input_ids.clone()
+            labels[labels == data_handler.tokenizer.pad_token_id] = -100
+
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                outputs = model(**inputs, labels=labels)
+                loss = outputs.loss
+
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+
+            epoch_loss += loss.item()
+
+            if batch_idx % 100 == 99:
+                logger.info(
+                    f"Epoch {epoch + 1}/{epochs} - Batch {batch_idx + 1}/{min(max_batches, len(train_loader))} - Loss: {loss.item():.4f}")
+
+        avg_loss = epoch_loss / (batch_idx + 1)
+        logger.info(f"Epoch {epoch + 1}/{epochs} - Average Loss: {avg_loss:.4f}")
+
+    logger.info("Finetuning of LLaMA model completed.")
 
 def evaluate_llama(model, data_handler, device='cuda', max_batches=100, top_k=5):
     """Validate the LLaMA model and compute accuracy, parameter count, average inference time per token, and GFLOPs.
