@@ -50,7 +50,92 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, max_batc
     logger.info("Completed pruning evaluation")
     return prune_dict, acc, param_count, inference_time, gflops
 
+@torch.no_grad()
 def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
+    """
+    Unstructured magnitude pruning (PAT benchmark version).
+    Zeros individual weights in Conv2d and Linear layers.
+    """
+    model.eval()
+
+    # ---------------------------------------------------------
+    # Collect all weights globally
+    # ---------------------------------------------------------
+    all_weights = []
+    layer_map = []
+
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear) and module.out_features == 1000:
+            # Leave final fc be
+            continue
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
+            all_weights.append(module.weight.data.abs().flatten())
+            layer_map.append(module)
+
+    all_weights_flat = torch.cat(all_weights)
+
+    total_params = all_weights_flat.numel()
+    num_prune = int(pruning_ratio * total_params)
+
+    logger.info(f"Total parameters: {total_params}, pruning: {num_prune}")
+
+    if num_prune == 0:
+        return {}
+
+    # ---------------------------------------------------------
+    # Global magnitude threshold
+    # ---------------------------------------------------------
+    threshold = torch.topk(
+        all_weights_flat,
+        num_prune,
+        largest=False
+    ).values.max()
+
+    # ---------------------------------------------------------
+    # Apply unstructured pruning (MASKING ONLY)
+    # ---------------------------------------------------------
+    original_counts = {}
+    pruned_counts = {}
+
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear) and module.out_features == 1000:
+            # Leave final fc be
+            continue
+        if isinstance(module, nn.Conv2d):
+            w = module.weight.data
+
+            original_counts[name] = w.numel()
+
+            mask = w.abs() > threshold
+            module.weight.data.mul_(mask)
+
+            pruned_counts[name] = mask.sum().item()
+
+        elif isinstance(module, nn.Linear):
+            w = module.weight.data
+
+            original_counts[name] = w.numel()
+
+            mask = w.abs() > threshold
+            module.weight.data.mul_(mask)
+
+            pruned_counts[name] = mask.sum().item()
+
+    # ---------------------------------------------------------
+    # Compute per-layer sparsity ratios (same return style)
+    # ---------------------------------------------------------
+    pruned_ratios = {}
+    for name in original_counts:
+        pruned_ratios[name] = pruned_counts[name] / original_counts[name]
+
+    model.eval()
+    torch.cuda.empty_cache()
+
+    logger.info("Completed UNSTRUCTURED pruning (PAT benchmark)")
+
+    return pruned_ratios
+
+def prune_resnet_struct(model, data_handler, device='cuda', pruning_ratio=0.5):
     """
     Instantiate pruner based on example: https://github.com/VainF/Torch-Pruning/blob/master/examples/torchvision_models/torchvision_pruning.py
     Args:
@@ -147,7 +232,7 @@ def finetune_resnet(model, data_handler, lr=2e-5, batch_size=64, epochs=10, devi
 
     train_loader = DataLoader(data_handler.train_set, batch_size=batch_size, shuffle=True)
 
-    model.train()
+    model.to(device).train()
     for epoch in range(epochs):
         epoch_loss = 0.0
         i = 0
@@ -233,96 +318,122 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
     Returns:
         dict: A dictionary containing the pruning ratios for each layer.
     """
-    # tp.utils.print_tool.before_pruning(model)
-    encoded = data_handler.tokenizer(
-        data_handler.train_set[0]['text'],
-        return_tensors="pt",
-        truncation=True,
-        max_length=16,
-    ).to(device)
-
-    inputs = encoded["input_ids"]
-    num_heads = {}
-    out_channel_groups = {}
-    seperate_qkv = False
-    for name, m in model.named_modules():
-        if name.endswith("self_attn"):
-            if hasattr(m, "q_proj"):
-                seperate_qkv = True
-                num_heads[m.q_proj] = model.config.num_attention_heads
-                num_heads[m.k_proj] = model.config.num_key_value_heads
-                num_heads[m.v_proj] = model.config.num_key_value_heads
-            elif hasattr(m, "qkv_proj"):
-                seperate_qkv = False
-                num_heads[m.qkv_proj] = model.config.num_attention_heads
-        if name.endswith('mlp'):
-            if hasattr(m, "gate_up_proj"):
-                out_channel_groups[m.gate_up_proj] = 2
+    model.eval()
 
     logger.info("Marked number of heads")
 
-    _is_gqa = model.config.num_attention_heads != model.config.num_key_value_heads
-    head_pruning_ratio = pruning_ratio
-    hidden_size_pruning_ratio = pruning_ratio
-    importance = tp.importance.GroupMagnitudeImportance(p=2,
-                                                        group_reduction='mean')  # tp.importance.ActivationImportance(p=2, target_types=[torch.nn.Linear])
-    logger.info("Setting up pruner")
-    pruner = tp.pruner.MagnitudePruner(
-        model,
-        example_inputs=inputs,
-        importance=importance,
-        global_pruning=True,
-        output_transform=lambda x: x.logits,
-        pruning_ratio=hidden_size_pruning_ratio,
-        ignored_layers=[model.lm_head],
-        num_heads=num_heads,
-        prune_num_heads=True,
-        prune_head_dims=False,  # we do not prune head dims so that we don't need to prune the ROPE
-        head_pruning_ratio=head_pruning_ratio,
-        out_channel_groups=out_channel_groups,
-        round_to=4,
+    _is_gqa = (
+            model.config.num_attention_heads
+            != model.config.num_key_value_heads
     )
 
-    logger.info("Pruner ready")
 
-    # Store parameter counts per layer before pruning to compare to pruned later
-    original_param_counts = {}
+    all_weights = []
+    layer_weights = []
+    layer_map = []
+
+    layers = model.model.layers
+
+    for i, layer in enumerate(layers):
+        if layer is model.lm_head:
+            # Leave final fc alone
+            continue
+        mlp = layer.mlp
+
+        gate = mlp.gate_proj if hasattr(mlp, "gate_proj") else mlp.gate_up_proj
+        up = mlp.up_proj
+        down = mlp.down_proj
+
+        # flatten all FFN weights into one vector per layer
+        layer_w = torch.cat([
+            gate.weight.flatten(),
+            up.weight.flatten(),
+            down.weight.flatten()
+        ])
+
+        layer_weights.append(layer_w)
+        layer_map.append((gate, up, down))
+
+        all_weights.append(layer_w)
+
+    all_weights_flat = torch.cat(all_weights)
+
+    total_params = all_weights_flat.numel()
+    num_prune = int(pruning_ratio * total_params)
+
+    logger.info(
+        f"Total FFN parameters: {total_params}, "
+        f"pruning: {num_prune}"
+    )
+
+    if num_prune == 0:
+        return {f"layer_{i}": 1.0 for i in range(len(layers))}
+
+    prune_threshold = torch.topk(
+        all_weights_flat.abs(),
+        num_prune,
+        largest=False
+    ).values.max()
+
+    pruned_ratios = {}
+
+    for i, layer in enumerate(layers):
+        if layer is model.lm_head:
+            # Leave final fc alone
+            continue
+        mlp = layer.mlp
+
+        gate = mlp.gate_proj if hasattr(mlp, "gate_proj") else mlp.gate_up_proj
+        up = mlp.up_proj
+        down = mlp.down_proj
+
+        before = (
+                gate.weight.numel()
+                + up.weight.numel()
+                + down.weight.numel()
+        )
+
+        # create masks
+        gate_mask = gate.weight.abs() > prune_threshold
+        up_mask = up.weight.abs() > prune_threshold
+        down_mask = down.weight.abs() > prune_threshold
+
+        gate.weight.data.mul_(gate_mask)
+        up.weight.data.mul_(up_mask)
+        down.weight.data.mul_(down_mask)
+
+        after = (
+                gate_mask.sum().item()
+                + up_mask.sum().item()
+                + down_mask.sum().item()
+        )
+
+        pruned_ratios[f"model.layers.{i}.self_attn"] = after / before
+
+
+    model.config.hidden_size = model.lm_head.in_features
+
     for name, m in model.named_modules():
+        if m is model.lm_head:
+            # Leave final fc alone
+            continue
         if name.endswith("self_attn"):
             if hasattr(m, "q_proj"):
-                original_param_counts[name] = m.q_proj.out_features
-            elif hasattr(m, "qkv_proj"):
-                original_param_counts[name] = m.qkv_proj.out_features
-        elif name.endswith("mlp"):
-            if hasattr(m, "gate_proj"):
-                original_param_counts[name] = m.gate_proj.out_features
-            elif hasattr(m, "gate_up_proj"):
-                original_param_counts[name] = m.gate_up_proj.out_features
-            else:
-                raise ValueError("Unknown mlp layer")
-
-    logger.info("Computed original parameter counts for each layer")
-
-    for g in pruner.step(interactive=True):
-        # logger.info(g)
-        g.prune()
-
-    # Update model attributes
-    model.config.hidden_size = model.lm_head.in_features
-    for name, m in model.named_modules():
-        if name.endswith("self_attn"):
-            if seperate_qkv:
                 m.hidden_size = m.q_proj.out_features
-            else:
+            elif hasattr(m, "qkv_proj"):
                 m.hidden_size = m.qkv_proj.out_features // 3
+
             m.num_heads = m.hidden_size // m.head_dim
             model.config.num_attention_heads = m.num_heads
-            # m.head_dim = m.q_proj.out_features // m.num_heads
+
             if not _is_gqa:
                 m.num_key_value_heads = m.num_heads
                 model.config.num_key_value_heads = m.num_heads
+
             if hasattr(m, "num_key_value_groups"):
-                m.num_key_value_groups = m.num_heads // model.config.num_key_value_heads
+                m.num_key_value_groups = (
+                        m.num_heads // model.config.num_key_value_heads
+                )
 
         elif name.endswith("mlp"):
             if hasattr(m, "gate_proj"):
@@ -330,43 +441,17 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
                 model.config.intermediate_size = m.gate_proj.out_features
             elif hasattr(m, "gate_up_proj"):
                 m.hidden_size = m.gate_up_proj.in_features
-                model.config.intermediate_size = m.gate_up_proj.out_features // 2
-            else:
-                raise ValueError("Unknown mlp layer")
+                model.config.intermediate_size = (
+                        m.gate_up_proj.out_features // 2
+                )
 
     if not _is_gqa:
         model.config.num_key_value_heads = model.config.num_attention_heads
-    # tp.utils.print_tool.after_pruning(model, do_print=True)
-    # logger.info(model.config)
-
-    logger.info("Completed pruning step")
-
-    # Get pruned ratios per layer
-    pruned_param_counts = {}
-    for name, m in model.named_modules():
-        if name.endswith("self_attn"):
-            if hasattr(m, "q_proj"):
-                pruned_param_counts[name] = m.q_proj.out_features
-            elif hasattr(m, "qkv_proj"):
-                pruned_param_counts[name] = m.qkv_proj.out_features
-        elif name.endswith("mlp"):
-            if hasattr(m, "gate_proj"):
-                pruned_param_counts[name] = m.gate_proj.out_features
-            elif hasattr(m, "gate_up_proj"):
-                pruned_param_counts[name] = m.gate_up_proj.out_features
-            else:
-                raise ValueError("Unknown mlp layer")
-
-    logger.info("Computing pruned parameter counts for each layer")
-
-    pruned_ratios = {}
-    for name, original_param_count in original_param_counts.items():
-        pruned_ratios[name] = pruned_param_counts[name] / original_param_count
 
     torch.cuda.empty_cache()
     model.eval()
 
-    logger.info("Computed pruning ratios. Finished pruning")
+    logger.info("Completed unstructured pruning")
 
     return pruned_ratios
 
@@ -468,10 +553,18 @@ def evaluate_llama(model, data_handler, device='cuda', max_batches=100, top_k=5)
 
     # Compute one more input for TFLOPs computation
     with torch.no_grad():
-        example_input = next(iter(val_loader))
-        example_input = data_handler.tokenizer(example_input['text'], return_tensors='pt', padding=True, truncation=True).to(device)
+        batch = next(iter(val_loader))
+
+        encoded = data_handler.tokenizer(
+            batch['text'],
+            return_tensors='pt',
+            padding=True,
+            truncation=True
+        ).to(device)
+
+        inputs = (encoded["input_ids"], encoded["attention_mask"])
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            macs, _ = count_ops_and_params(model, example_input)
+            macs, _ = count_ops_and_params(model, inputs)
     gflops = 2 * (macs / inference_time) / 1e9  # Convert to GFLOPs
 
     return accuracy, param_count, avg_inference_time, gflops

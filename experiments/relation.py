@@ -42,15 +42,21 @@ def _collect_activations(model, x, layers):
 
     def hook_fn(module, input, output):
         # Flatten spatial dims but keep batch
-        activations.append(output.detach().flatten(1))
+        activations.append(output[0].detach().flatten(1))
 
     hooks = []
     for layer in layers:
         hooks.append(layer.register_forward_hook(hook_fn))
 
-    model.eval()
-    with torch.no_grad():
-        model(x)
+    if "resnet" in model.__class__.__name__.lower():
+        model.eval()
+        with torch.no_grad():
+            model(x)
+    else:
+        model.eval()
+        with torch.no_grad():
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                model(**x)
 
     for h in hooks:
         h.remove()
@@ -84,7 +90,7 @@ def _linear_cka(X, Y):
     return (hsic / (norm_x * norm_y + 1e-8)).item()
 
 
-def cka_similarity_matrix(model_a, model_b, dataloader, device="cuda", max_batches=10):
+def cka_similarity_matrix(model_a, model_b, dataloader, device="cuda", max_batches=10, tokenizer=None):
     """
     Computes a CKA similarity matrix between layers of two models.
 
@@ -94,7 +100,7 @@ def cka_similarity_matrix(model_a, model_b, dataloader, device="cuda", max_batch
         dataloader: DataLoader providing input batches
         device: device to run on
         max_batches: number of batches to average over
-
+        tokenizer: Optional tokenizer for text data (only needed if models are LLaMA)
     Returns:
         np.ndarray of shape (m, n)
     """
@@ -112,9 +118,14 @@ def cka_similarity_matrix(model_a, model_b, dataloader, device="cuda", max_batch
     acts_b_all = [[] for _ in range(n)]
 
     logger.info("Prepped for CKA computation, starting to collect activations and compute similarity matrix.")
-    for i, (x, _) in enumerate(dataloader):
+    for i, x in enumerate(dataloader):
         if i >= max_batches:
             break
+
+        if "resnet" in model_a.__class__.__name__.lower() or "resnet" in model_b.__class__.__name__.lower():
+            x, _ = x
+        else:
+            x = tokenizer(x['text'], return_tensors='pt', padding=True, truncation=True)
 
         x = x.to(device)
 
@@ -304,7 +315,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         logger.info("Saved linearity vs pruning scatterplot.")
     if student_model is not None:
         data_loader = DataLoader(data_handler.val_set, batch_size=batch_size, shuffle=False)
-        matrix, parent_layer_names, _ = cka_similarity_matrix(experimenter.model, student_model, data_loader, device=device, max_batches=max_batches)
+        matrix, parent_layer_names, _ = cka_similarity_matrix(experimenter.model, student_model, data_loader, device=device, max_batches=max_batches, tokenizer=data_handler.tokenizer if "llama" in model else None)
         visualize_cka_similarity_matrix(matrix, save_dir, parent_layer_names, linearity_scores)
         logger.info("Saved cka similarity heatmap.")
 

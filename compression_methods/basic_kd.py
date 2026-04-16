@@ -51,6 +51,26 @@ def get_student_resnet(blocks=None, block=models.resnet.BasicBlock):
     return model
 
 
+def load_teacher_into_student(teacher, student):
+    teacher_dict = teacher.state_dict()
+    student_dict = student.state_dict()
+
+    filtered_dict = {}
+
+    for k, v in student_dict.items():
+        if k in teacher_dict:
+            if teacher_dict[k].shape == v.shape:
+                filtered_dict[k] = teacher_dict[k]
+            else:
+                # skip mismatched layers (important for reduced blocks)
+                continue
+
+    student_dict.update(filtered_dict)
+    student.load_state_dict(student_dict, strict=False)
+
+    return student
+
+
 def train_student_resnet(teacher_model, student_model, data_handler, optimizer, device='cuda', epochs=5, max_batches=100):
     teacher_model.to(device).eval()
     student_model.to(device).train()
@@ -153,6 +173,7 @@ def distill_student_resnet(experimenter, data_handler, device='cuda', lr=2e-5, e
 
     teacher_model = experimenter.model
     student_model = get_student_resnet(blocks=blocks)
+    student_model = load_teacher_into_student(teacher_model, student_model)
     logger.info("Loaded student and teacher ResNet models.")
 
     train_student_resnet(teacher_model, student_model, data_handler,
@@ -177,14 +198,7 @@ def get_student_llama(parent_model, hidden_layer_reduction=2):
     # Make a copy of the parent model
     student_model = deepcopy(parent_model)
     # Reduce the number of hidden layers
-    student_model.model.layers = student_model.model.layers[::hidden_layer_reduction]
-    # Reset weights
-    for layer in student_model.model.layers:
-        layer.reset_parameters()
-    student_model.lm_head.reset_parameters()
-    student_model.model.embed_tokens.reset_parameters()
-    student_model.model.norm.reset_parameters()
-    student_model.model.rotary_emb.reset_parameters()
+    student_model.model.layers = student_model.model.layers[:-hidden_layer_reduction]
 
     return student_model
 
@@ -223,7 +237,7 @@ def train_student_llama(teacher_model, student_model, data_handler, optimizer, d
                 with torch.no_grad():
                     teacher_outputs = teacher_model(**inputs, labels=labels)
                 student_outputs = student_model(**inputs, labels=labels)
-                loss = criterion(student_outputs, teacher_outputs, labels)
+                loss = criterion(student_outputs.logits, teacher_outputs.logits, labels)
 
             loss.backward()
             nn.utils.clip_grad_norm_(student_model.parameters(), 1.0)
@@ -292,11 +306,18 @@ def evaluate_student_llama(student_model, data_handler, device='cuda', max_batch
 
     # Compute one more input for TFLOPs computation
     with torch.no_grad():
-        example_input = next(iter(val_loader))
-        example_input = data_handler.tokenizer(example_input['text'], return_tensors='pt', padding=True,
-                                                    truncation=True).to(device)
+        batch = next(iter(val_loader))
+
+        encoded = data_handler.tokenizer(
+            batch['text'],
+            return_tensors='pt',
+            padding=True,
+            truncation=True
+        ).to(device)
+
+        inputs = (encoded["input_ids"], encoded["attention_mask"])
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            macs, _ = count_ops_and_params(model, example_input)
+            macs, _ = count_ops_and_params(model, inputs)
     gflops = 2 * (macs / inference_time) / 1e9  # Convert to GFLOPs
 
     return accuracy, param_count, avg_inference_time, gflops
