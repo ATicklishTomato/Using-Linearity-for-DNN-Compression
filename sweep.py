@@ -41,7 +41,7 @@ def parse_args():
                              'To take a hard threshold, enter a floating point value, e.g. \'-0.01\'. Default is 75th percentile.')
     parser.add_argument('--batch_size', type=int, default=[64,128,256], nargs='*',
                         help='Batch size for training and evaluation.')
-    parser.add_argument('--epochs', type=int, default=[10,25,50], nargs='*',
+    parser.add_argument('--epochs', type=int, default=[10,20,30], nargs='*',
                         help='Number of epochs for training and fine-tuning.')
     parser.add_argument('--lr', type=float, default=[2e-4,2e-5], nargs='*',
                         help='Learning rate for optimizer.')
