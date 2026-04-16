@@ -6,9 +6,10 @@ from typing import Union
 import numpy as np
 import torch
 import wandb
+import matplotlib
+matplotlib.use("Agg") # Avoid errors when running without UI
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
-from transformers import LlamaForCausalLM
 
 from metrics.linearity_metric_manager import LinearityMetric
 from utils.data_manager import DataManager
@@ -206,7 +207,8 @@ def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_scores:
     plt.close()
 
 def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, batch_size: int,
-                           epochs: int, lr: float, max_batches: int, save: bool, seed: int, device: str):
+                           epochs: int, lr: float, max_batches: int, save: bool, seed: int, device: str, pruning_ratio: float=0.1,
+                   blocks: Union[None, list]=None, hidden_layer_reduction: int=2):
     """Run the relation to other compression methods experiment.
     Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
     Args:
@@ -221,6 +223,9 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         save (bool): Whether to save the trained models and results.
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
+        pruning_ratio (float): The ratio of pruning scores to use for each layer.
+        blocks (Union[None, list]): The list of blocks to use for distilled resnet.
+        hidden_layer_reduction (int): The number of hidden layers to remove for distilled llama.
     """
     save_dir = "./results/rq2/" + relation_to + "/resnet/" + dataset + "/" + str(seed)
     os.makedirs(save_dir, exist_ok=True)
@@ -277,18 +282,18 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     match relation_to:
         case 'magnitude_pruning':
             from compression_methods.magnitude_pruning import prune
-            # Pruning ratio that is hardcoded has been found to perform best
-            prune_dict, mag_acc, mag_param, mag_infer, mag_gflops = prune(experimenter, data_handler, device=device,
-                                                                          pruning_ratio=0.1, max_batches=max_batches,
+            prune_dict, acc, param, infer, gflops = prune(experimenter, data_handler, device=device,
+                                                                          pruning_ratio=pruning_ratio, max_batches=max_batches,
                                                                           lr=lr, batch_size=batch_size, epochs=epochs)
         case 'basic_kd':
             from compression_methods.basic_kd import distill
-            student_model, dist_acc, dist_param, dist_infer, dist_gflops = distill(experimenter, data_handler,
-                                                                                   device=device,
+            if blocks is None:
+                blocks = [1,1,2,2]
+            student_model, acc, param, infer, gflops = distill(experimenter, data_handler,device=device,
                                                                                    lr=lr, epochs=epochs,
                                                                                    max_batches=max_batches,
-                                                                                   blocks=[1,1,2,2],
-                                                                                   hidden_layer_reduction=2)
+                                                                                   blocks=blocks,
+                                                                                   hidden_layer_reduction=hidden_layer_reduction)
 
     # --------------------------------------------------------------
     # Generate either scatterplot or similarity matrix
@@ -335,6 +340,10 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         "linearity": linearity,
         "seed": seed,
         "linearity_scores": linearity_scores,
+        "comp_acc": acc,
+        "comp_param": param,
+        "comp_infer": infer,
+        "comp_gflops": gflops,
     }
 
     if prune_dict is not None:

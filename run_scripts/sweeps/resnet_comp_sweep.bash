@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=resnet_sweep
-#SBATCH --output=resnet_sweep_output_%j.txt
+#SBATCH --job-name=resnet_comp_sweep
+#SBATCH --output=resnet_comp_sweep_output_%j.txt
 #SBATCH --partition tue.gpu.q
 #SBATCH --gres=gpu:l4.22gb:1
 #SBATCH --time=10:00:00

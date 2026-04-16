@@ -24,16 +24,26 @@ def parse_args():
                         choices=['imagenet', 'tinystories'],
                         default='imagenet',
                         help='Dataset to use for sweep training and evaluation.')
+    parser.add_argument('-e', '--experiment', type=str,
+                        choices=['relation', 'compression', 'benchmark_compression'],
+                        default='compression',
+                        help='The type of experiment to run. "relation" tests the relation between ' +
+                             'inherent linearity and another compression method. "compression" tests ' +
+                             'inherent linearity as a tool for compression. "benchmark_compression" runs other compression methods to allow a comparison.')
+    parser.add_argument('--relation', type=str,
+                        choices=['magnitude_pruning', 'basic_kd'],
+                        default='magnitude_pruning',
+                        help='The relation experiment to run. Only applicable if experiment type is "relation". Ignored otherwise.')
     parser.add_argument('-t', '--threshold', type=str, nargs='*',
-                        default=[str(num) + "%" for num in range(25, 90, 5)],
+                        default=["50%"],
                         help='The thresholds to try for determining what is(n\'t) linear. To take a percentile, ' +
                              'enter a percentage, e.g. \'75%%\' to consider anything smaller the 75th percentile as non-linear. ' +
                              'To take a hard threshold, enter a floating point value, e.g. \'-0.01\'. Default is 75th percentile.')
-    parser.add_argument('--batch_size', type=int, default=128,
+    parser.add_argument('--batch_size', type=int, default=[64,128,256], nargs='*',
                         help='Batch size for training and evaluation.')
-    parser.add_argument('--epochs', type=int, default=10,
+    parser.add_argument('--epochs', type=int, default=[10,25,50], nargs='*',
                         help='Number of epochs for training and fine-tuning.')
-    parser.add_argument('--lr', type=float, default=2e-5,
+    parser.add_argument('--lr', type=float, default=[2e-4,2e-5], nargs='*',
                         help='Learning rate for optimizer.')
     parser.add_argument('--max_batches', type=int, default=None,
                         help='Maximum number of batches to process during training/evaluation. ' +
@@ -56,19 +66,33 @@ def parse_args():
     return parser.parse_args()
 
 def sweep_train(config_defaults=None):
+    config_defaults = {
+        "batch_size": 64,
+        "learning_rate": 2e-5,
+        "epochs": 10,
+        "threshold": "50%",
+        "pruning_ratio": 0.1,
+        "blocks": None,
+        "hidden_layer_reduction": 2,
+    }
     generic_args = parse_args()
     wandb.init(config=config_defaults, tags=generic_args.wandb_tags)
 
-    if "llama" in generic_args.model:
+    if "llama" in generic_args.model and generic_args.experiment == "compression":
         from experiments.llama_approx_compression import run_experiment
         run_experiment(generic_args.model, generic_args.linearity, generic_args.dataset, wandb.config.threshold,
                        generic_args.batch_size, generic_args.epochs, generic_args.lr, generic_args.max_batches,
                        False, generic_args.seed, generic_args.device, sweep=True)
-    elif "resnet" in generic_args.model:
+    elif "resnet" in generic_args.model and generic_args.experiment == "compression":
         from experiments.resnet_fold_compression import run_experiment
         run_experiment(generic_args.model, generic_args.linearity, generic_args.dataset, wandb.config.threshold,
                        generic_args.batch_size, generic_args.epochs, generic_args.lr, generic_args.max_batches,
                        False, generic_args.seed, generic_args.device, sweep=True)
+    elif generic_args.experiment == "relation":
+        from experiments.relation import run_experiment
+        run_experiment(generic_args.model, generic_args.linearity, generic_args.dataset, generic_args.relation, wandb.config.batch_size, wandb.config.epochs,
+                       wandb.config.lr, generic_args.max_batches, False, generic_args.seed, generic_args.device,
+                       pruning_ratio=wandb.config.pruning_ratio, blocks=wandb.config.blocks, hidden_layer_reduction=wandb.config.hidden_layer_reduction)
     else:
         raise ValueError("Unknown model type.")
 
@@ -92,19 +116,45 @@ if __name__ == '__main__':
     project_name = ""
     if args.wandb_project:
         project_name = args.wandb_project
-    else:
+    elif args.experiment == "compression":
         project_name = args.model + "_compression"
+    elif args.experiment == "relation":
+        project_name = args.model + "_relation"
+    else:
+        raise ValueError("Unknown experiment type.")
 
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
+    if args.experiment == "compression":
+        target = {'name': 'compression_score', 'goal': 'maximize'}
+    else:
+        target = {'name': 'comp_acc', 'goal': 'maximize'}
+
     sweep_config = {
         'method': 'random',
-        'metric': {'name': 'compression_score', 'goal': 'maximize'},
+        'metric': target,
         'parameters': {
-            'threshold': {'values': args.threshold},
+            'epochs': {'values': args.epochs},
+            'lr': {'values': args.lr},
+            'batch_size': {'values': args.batch_size},
         }
     }
+
+    if args.experiment == "compression":
+        sweep_config['parameters']['threshold'] = {'values': args.threshold}
+    elif args.experiment == "relation":
+        if args.relation in ['magnitude_pruning']:
+            sweep_config['parameters']['pruning_ratio'] = {'values': [0.1, 0.2, 0.3, 0.4]}
+        else:
+            if "resnet" in args.model:
+                sweep_config['parameters']['blocks'] = {'values': [
+                    [1, 2, 2, 2],
+                    [1, 1, 2, 2],
+                    [1, 1, 1, 2]
+                ]}
+            else:
+                sweep_config['parameters']['hidden_layer_reduction'] = {'values': [2, 3, 4, 5]}
 
     sweep_id = wandb.sweep(sweep_config, entity="linearity-thesis", project=project_name)
     wandb.agent(sweep_id, function=sweep_train, count=args.sweep_runs)

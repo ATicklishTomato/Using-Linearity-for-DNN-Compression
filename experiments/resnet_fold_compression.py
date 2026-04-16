@@ -290,7 +290,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
             "accuracy_loss": accuracy_loss,
             "param_compression_ratio": param_compression_ratio,
             "speedup": speedup,
-            "tflop_reduction": tflop_reduction,
+            "gflop_reduction": tflop_reduction,
         }
         with open(f"{save_dir}/{model}_folding_results.json", "w") as f:
             json.dump(results, f, indent=4)
@@ -307,7 +307,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         "accuracy_loss": accuracy_loss,
         "param_compression_ratio": param_compression_ratio,
         "speedup": speedup,
-        "tflop_reduction": tflop_reduction,
+        "gflop_reduction": tflop_reduction,
     }
 
     if sweep:
