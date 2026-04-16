@@ -30,7 +30,7 @@ def parse_args():
                         help='Dataset to use for training and evaluation.')
     parser.add_argument('-e', '--experiment', type=str,
                         choices=['relation', 'compression', 'benchmark_compression'],
-                        default='relation',
+                        default='compression',
                         help='The type of experiment to run. "relation" tests the relation between ' +
                              'inherent linearity and another compression method. "compression" tests ' +
                              'inherent linearity as a tool for compression. "benchmark_compression" runs other compression methods to allow a comparison.')
@@ -122,18 +122,22 @@ if __name__ == '__main__':
 
     logger.info(f"Starting experiment with configuration: {wandb_config}")
 
-    match (args.model, args.experiment, args.relation):
-        case ('llama-2-7b' | 'llama-2-13b' | 'llama-3-1b' | 'llama-3-3b', 'compression', _):
+    match (args.model, args.experiment):
+        case ('llama-2-7b' | 'llama-2-13b' | 'llama-3-1b' | 'llama-3-3b', 'compression'):
             from experiments.llama_approx_compression import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
                            args.epochs, args.lr, args.max_batches, args.save, args.seed, args.device)
-        case ('resnet18' | 'resnet34' | 'resnet50', 'compression', _):
+        case ('resnet18' | 'resnet34' | 'resnet50', 'compression'):
             from experiments.resnet_fold_compression import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
                            args.epochs, args.lr, args.max_batches, args.save, args.seed, args.device)
-        case (_, 'benchmark_compression', _):
+        case (_, 'benchmark_compression'):
             from experiments.benchmark_compression import benchmark_compression_methods
             benchmark_compression_methods(args.model, args.dataset, args.batch_size, args.epochs, args.lr,
+                                          args.max_batches, args.save, args.seed, args.device)
+        case (_, 'relation'):
+            from experiments.relation import run_experiment
+            run_experiment(args.model, args.linearity, args.dataset, args.relation, args.batch_size, args.epochs, args.lr,
                                           args.max_batches, args.save, args.seed, args.device)
         case _:
             logger.error("Invalid combination of model, experiment, and relation.")

@@ -122,9 +122,9 @@ def mean_preactivations(model, data_handler, max_batches=30, device='cuda', save
         dict: A dictionary with layer names as keys and mean preactivation values as values.
     """
     save_path = f"{save_dir}/mean_preactivations_{model.__class__.__name__}.pt"
-    if save and os.path.exists(save_path):
-        logger.info("Loading mean preactivations from disk...")
-        return torch.load(save_path)
+    # if save and os.path.exists(save_path):
+    #     logger.info("Loading mean preactivations from disk...")
+    #     return torch.load(save_path)
 
     model.to(device)
     model.eval()

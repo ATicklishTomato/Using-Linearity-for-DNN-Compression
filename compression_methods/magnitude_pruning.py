@@ -69,21 +69,23 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
     for m in model.modules():
         if isinstance(m, nn.Linear) and m.out_features == 1000:
             ignored_layers.append(m)
+    logger.info(f"Prepped {len(ignored_layers)} ignored layers")
 
     example_inputs = torch.rand((1, *data_handler.train_set[0][0].shape)).to(device)
     importance = tp.importance.GroupMagnitudeImportance(p=1)
+    logger.info("Setting up pruner")
     pruner = tp.pruner.MagnitudePruner(
         model,
         example_inputs=example_inputs,
         importance=importance,
         iterative_steps=1,
         pruning_ratio=pruning_ratio,
-        global_pruning=False,
+        global_pruning=True,
         ignored_layers=ignored_layers,
     )
 
-    logger.info("Model Name: {}".format(model.__class__.__name__))
-    tp.utils.print_tool.before_pruning(model)
+    logger.info(f"Pruner set up for model name: {model.__class__.__name__}")
+    # tp.utils.print_tool.before_pruning(model)
 
     # Store parameter counts per layer before pruning to compare to pruned later
     original_param_counts = {}
@@ -95,6 +97,7 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
             elif isinstance(module, nn.Linear):
                 original_param_counts[name] = module.out_features
 
+    logger.info("Computed original parameter counts for each layer")
 
     layer_channel_cfg = {}
     for module in model.modules():
@@ -110,11 +113,13 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
     # or
     # pruner.step()
 
+    logger.info("Completed pruning step")
+
     if isinstance(pruner, (tp.pruner.BNScalePruner, tp.pruner.GroupNormPruner, tp.pruner.GrowingRegPruner)):
         pruner.update_regularizer()  # if the model has been pruned, we need to update the regularizer
         pruner.regularize(model)
 
-    tp.utils.print_tool.after_pruning(model)
+    # tp.utils.print_tool.after_pruning(model)
 
     # Get pruned ratios per layer
     pruned_param_counts = {}
@@ -125,9 +130,13 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
             elif isinstance(module, nn.Linear):
                 pruned_param_counts[name] = module.out_features
 
+    logger.info("Computed pruned parameter counts for each layer")
+
     pruned_ratios = {}
     for name, original_param_count in original_param_counts.items():
         pruned_ratios[name] = pruned_param_counts[name] / original_param_count
+
+    logger.info("Computed pruned ratios. Finished pruning")
 
     return pruned_ratios
 
@@ -250,16 +259,19 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
             if hasattr(m, "gate_up_proj"):
                 out_channel_groups[m.gate_up_proj] = 2
 
+    logger.info("Marked number of heads")
+
     _is_gqa = model.config.num_attention_heads != model.config.num_key_value_heads
     head_pruning_ratio = pruning_ratio
     hidden_size_pruning_ratio = pruning_ratio
     importance = tp.importance.GroupMagnitudeImportance(p=2,
                                                         group_reduction='mean')  # tp.importance.ActivationImportance(p=2, target_types=[torch.nn.Linear])
+    logger.info("Setting up pruner")
     pruner = tp.pruner.MagnitudePruner(
         model,
         example_inputs=inputs,
         importance=importance,
-        global_pruning=False,
+        global_pruning=True,
         output_transform=lambda x: x.logits,
         pruning_ratio=hidden_size_pruning_ratio,
         ignored_layers=[model.lm_head],
@@ -270,6 +282,8 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
         out_channel_groups=out_channel_groups,
         round_to=4,
     )
+
+    logger.info("Pruner ready")
 
     # Store parameter counts per layer before pruning to compare to pruned later
     original_param_counts = {}
@@ -286,6 +300,8 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
                 original_param_counts[name] = m.gate_up_proj.out_features
             else:
                 raise ValueError("Unknown mlp layer")
+
+    logger.info("Computed original parameter counts for each layer")
 
     for g in pruner.step(interactive=True):
         # logger.info(g)
@@ -321,7 +337,9 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
     if not _is_gqa:
         model.config.num_key_value_heads = model.config.num_attention_heads
     # tp.utils.print_tool.after_pruning(model, do_print=True)
-    logger.info(model.config)
+    # logger.info(model.config)
+
+    logger.info("Completed pruning step")
 
     # Get pruned ratios per layer
     pruned_param_counts = {}
@@ -339,12 +357,16 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
             else:
                 raise ValueError("Unknown mlp layer")
 
+    logger.info("Computing pruned parameter counts for each layer")
+
     pruned_ratios = {}
     for name, original_param_count in original_param_counts.items():
         pruned_ratios[name] = pruned_param_counts[name] / original_param_count
 
     torch.cuda.empty_cache()
     model.eval()
+
+    logger.info("Computed pruning ratios. Finished pruning")
 
     return pruned_ratios
 

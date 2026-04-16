@@ -153,13 +153,16 @@ def distill_student_resnet(experimenter, data_handler, device='cuda', lr=2e-5, e
 
     teacher_model = experimenter.model
     student_model = get_student_resnet(blocks=blocks)
+    logger.info("Loaded student and teacher ResNet models.")
 
     train_student_resnet(teacher_model, student_model, data_handler,
                          torch.optim.Adam(student_model.parameters(), lr=lr),
                          device=device, epochs=epochs, max_batches=max_batches)
+    logger.info("Finished training student ResNet model.")
 
     accuracy, param_count, inference_time, gflops = evaluate_student_resnet(student_model, data_handler,
                                                                             device=device, max_batches=max_batches)
+    logger.info(f"Finished evaluating student ResNet model. Accuracy: {accuracy}, Params: {param_count}, Inference Time: {inference_time}, GFLOPs: {gflops}")
 
     return student_model, accuracy, param_count, inference_time, gflops
 
@@ -319,13 +322,16 @@ def distill_student_llama(experimenter, data_handler, device='cuda', lr=2e-5, ep
     """
     teacher_model = experimenter.model
     student_model = get_student_llama(teacher_model, hidden_layer_reduction=hidden_layer_reduction)
+    logger.info("Loaded student and teacher LLaMA models.")
 
     train_student_llama(teacher_model, student_model, data_handler,
                          torch.optim.Adam(student_model.parameters(), lr=lr),
                          device=device, epochs=epochs, max_batches=max_batches)
+    logger.info("Finished training student LLaMA model.")
 
     accuracy, param_count, inference_time, gflops = evaluate_student_llama(student_model, data_handler, device=device,
                                                                            max_batches=max_batches, top_k=top_k)
+    logger.info(f"Finished evaluating student LLaMA model. Accuracy: {accuracy}, Params: {param_count}, Inference Time: {inference_time}, GFLOPs: {gflops}")
 
     return student_model, accuracy, param_count, inference_time, gflops
 

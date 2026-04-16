@@ -177,7 +177,12 @@ cython_debug/
 .idea/
 
 **/data/*
+!**/data/README.md
 *.login
 *.pt
 **/compressed_llama2_7b
 wandb_logs
+results/*
+!results/*.tar.gz
+!results/*.rar
+!results/*.zip
