@@ -42,7 +42,25 @@ def _collect_activations(model, x, layers):
 
     def hook_fn(module, input, output):
         # Flatten spatial dims but keep batch
-        activations.append(output[0].detach().flatten(1))
+        if isinstance(output, tuple):
+            output = output[0]
+
+        if output.dim() == 4:
+            # [B, C, H, W] → [B, C, H*W]
+            output = output.flatten(1)
+
+        if output.dim() == 3:
+            # [B, S, H] → [B, H]
+            output = output.mean(dim=1)
+
+        elif output.dim() == 2:
+            # already [B, H]
+            pass
+
+        else:
+            raise ValueError(f"Unexpected shape: {output.shape}")
+
+        activations.append(output.detach())
 
     hooks = []
     for layer in layers:
@@ -67,7 +85,7 @@ def _collect_activations(model, x, layers):
 def _center_gram(X):
     """Center Gram matrix."""
     n = X.size(0)
-    unit = torch.ones(n, n, device=X.device) / n
+    unit = torch.ones(n, n, device=X.device, dtype=X.dtype) / n
     return X - unit @ X - X @ unit + unit @ X @ unit
 
 
@@ -167,15 +185,14 @@ def visualize_cka_similarity_matrix(matrix, save_dir, layer_names, linearity_sco
     """
     logger.info(f"Visualizing CKA similarity matrix with shape {matrix.shape} and saving to {save_dir}/cka_similarity_heatmap.png")
     model_name = "llama" if "llama" in save_dir else "resnet"
-    num_layers = len(layer_names)
 
+    ticks = []
     y_labels = []
-    for name in layer_names:
+    for i, name in enumerate(layer_names):
         if name in linearity_scores:
             score = linearity_scores[name]
+            ticks.append(i)
             y_labels.append(f"{name.split('.')[-1]} ({score:.4f})")
-        else:
-            y_labels.append(f"{name.split('.')[-1]} (N/A)")
 
     plt.imshow(matrix, cmap='magma', vmin=0, vmax=1, origin='upper')
     plt.colorbar(label=f'CKA Similarity of {model_name} layers')
@@ -185,7 +202,7 @@ def visualize_cka_similarity_matrix(matrix, save_dir, layer_names, linearity_sco
     plt.gca().xaxis.tick_top()
     plt.gca().xaxis.set_label_position('top')
     plt.xticks(rotation=90)
-    plt.yticks(ticks=np.arange(num_layers), labels=y_labels, rotation=0)
+    plt.yticks(ticks=ticks, labels=y_labels, rotation=45)
     plt.tight_layout()
     plt.savefig(f"{save_dir}/cka_similarity_heatmap.png")
     plt.close()
@@ -238,7 +255,8 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         blocks (Union[None, list]): The list of blocks to use for distilled resnet.
         hidden_layer_reduction (int): The number of hidden layers to remove for distilled llama.
     """
-    save_dir = "./results/rq2/" + relation_to + "/resnet/" + dataset + "/" + str(seed)
+    short_model = "llama" if "llama" in model else "resnet"
+    save_dir = "./results/rq2/" + relation_to + "/" + short_model + "/" + dataset + "/" + str(seed)
     os.makedirs(save_dir, exist_ok=True)
 
     # ------------------------------------------------------------
@@ -335,7 +353,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         if student_model is not None:
             if "llama" in model:
                 # Save llama
-                experimenter.model.save_pretrained(f"{save_dir}/compressed_{student_model}")
+                experimenter.model.save_pretrained(f"{save_dir}/compressed_{model}")
             else:
                 torch.save(student_model.state_dict(), f"{save_dir}/{model}_distilled.pth")
             logger.info(f"Saved student model to {save_dir}/{model}_distilled.pth")
