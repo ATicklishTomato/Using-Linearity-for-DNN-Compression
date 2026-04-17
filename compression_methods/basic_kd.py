@@ -44,7 +44,7 @@ class ForwardKLLoss(torch.nn.Module):
 
 def get_student_resnet(blocks=None, block=models.resnet.BasicBlock):
     if blocks is None:
-        blocks = [2, 2, 1, 1]
+        blocks = [1, 2, 2, 2]
 
     model = models.resnet.ResNet(block, blocks)
 

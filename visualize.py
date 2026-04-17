@@ -1,143 +1,72 @@
-import re
-import matplotlib.pyplot as plt
-import numpy as np
-import torch
+import argparse
 
 
-def cosine_similarity_matrix(linearity_compression_model: torch.nn.Module, kd_model: torch.nn.Module) -> np.ndarray:
-    """Computes the cosine similarity matrix for the layers of a model compressed with linearity compression and a model compressed with knowledge distillation.
-    Args:
-        linearity_compression_model: Linearity compression model with m layers (LLama or ResNet)
-        kd_model: Knowledge distillation model with n layers (LLama or ResNet)
-    Returns:
-        A numpy array of shape (m, n) containing the cosine similarity values between the layers of the two models.
-    """
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--rq', type=str, choices=['rq1', 'rq2'], default='rq1',
+                        help='Which Research Question to aggregate results for')
+    parser.add_argument('--threshold', type=int, default=75,
+                        help='Threshold to aggregate results for')
+    parser.add_argument('--model', type=str,
+                        choices=['resnet18', 'resnet34', 'resnet50', 'llama-2-7b', 'llama-2-13b', 'llama-3-1b', 'llama-3-3b'],
+                        default='resnet18',
+                        help='Which model to aggregate results for')
+    parser.add_argument('--dataset', type=str, choices=['imagenet', 'tinystories'], default='imagenet',
+                        help='Which dataset to aggregate results for')
+    return parser.parse_args()
 
-    # Define target layers
-    if "resnet" in linearity_compression_model.__class__.__name__:
-        target_layer_pattern = r".*conv.*"
-    elif "llama" in linearity_compression_model.__class__.__name__:
-        target_layer_pattern = r"model\.layers\..*\.self_attn"
-    else:
-        raise ValueError(f"Unrecognized linearity compression model: {linearity_compression_model}")
+def mean_rq1_results(path):
+    # Read all *results.json files for 'accuracy_loss', 'param_compression_ratio', 'speedup', and 'tflop_reduction' and compute the mean for each metric
+    import json
+    import glob
 
-    # Count layers per model
-    m = len([1 for name, module in linearity_compression_model.named_modules() if re.match(target_layer_pattern, name)])
-    n = len([1 for name, module in kd_model.named_modules() if re.match(target_layer_pattern, name)])
+    metrics = ['accuracy_loss', 'param_compression_ratio', 'speedup', 'gflop_reduction']
+    results = {metric: [] for metric in metrics}
+    files = glob.glob(path + '/**/*.json', recursive=True)
+    for file in files:
+        with open(file, 'r') as f:
+            data = json.load(f)
+            results['accuracy_loss'].append(data['accuracy_loss'])
+            results['param_compression_ratio'].append(data['param_compression_ratio'])
+            results['speedup'].append(data['speedup'])
+            if data['tflop_reduction'] is not None:
+                # Some data was labeled wrongly, this deals with that
+                results['gflop_reduction'].append(data['tflop_reduction'])
+            else:
+                results['gflop_reduction'].append(data['gflop_reduction'])
 
-    matrix = np.zeros((m, n))
+    mean_results = {metric: sum(values)/len(values) for metric, values in results.items()}
+    return mean_results
 
-    m_counter = 0
-    n_counter = 0
-    for lin_name, lin_module in linearity_compression_model.named_modules():
-        if re.match(target_layer_pattern, lin_name):
-            for kd_name, kd_module in kd_model.named_modules():
-                if re.match(target_layer_pattern, kd_name):
-                    # Compute cosine similarity between the two layers
-                    lin_weights = lin_module.weight.data.view(-1)
-                    kd_weights = kd_module.weight.data.view(-1)
-                    cos_sim = torch.nn.functional.cosine_similarity(lin_weights, kd_weights, dim=0).item()
-                    matrix[m_counter, n_counter] = cos_sim
-                    n_counter += 1
-            m_counter += 1
-            n_counter = 0
+def generate_latex_results_table(mean_results, args, path):
+    """This function takes a dictionary of mean results, and generates a latex table. Gets stored in the results directory"""
 
-    return matrix
+    table = "\\begin{table}[H]\n"
+    table += "\\caption{Results for " + args.model + " averaged over 5 runs}\n"
+    table += "\\label{tab:" + args.model + "_results}\n"
+    table += "\\begin{center}\n"
+    table += "\\begin{tabular}{|c|c|c|c|c|c|c|}\n\\hline\n"
+    table += "\\textbf{Model} & \\textbf{Dataset} & \\textbf{Threshold} & \\textbf{Accuracy Loss$\\downarrow$} & \\textbf{Param Compression Ratio$\\uparrow$} & \\textbf{Speedup$\\uparrow$} & \\textbf{GFLOP Reduction$\\uparrow$} \\\\\n\\hline\n"
+    table += f"{args.model} & {args.dataset} & {args.threshold} & {mean_results['accuracy_loss']:.4f} & {mean_results['param_compression_ratio']:.4f} & {mean_results['speedup']:.4f} & {mean_results['gflop_reduction']:.4f} \\\\\n"
+    table += "\\end{tabular}\n"
+    table += "\\end{center}\n"
+    table += "\\end{table}\n"
 
-
-def average_cosine_similarity_matrix(matrix: np.ndarray, *args) -> np.ndarray:
-    """Computes the average cosine similarity matrix for the layers of a model.
-    Args:
-        matrix: A numpy array of shape (m, n) containing the cosine similarity values between the layers.
-        *args: Any number of matrices also of shape (m, n) containing the cosine similarity values.
-    """
-    # Verify all arguments are matrices and have the same shape
-    shape = matrix.shape
-    m = shape[0]
-    n = shape[1]
-    for mat in args:
-        if type(mat) != np.ndarray:
-            raise ValueError(f"All arguments must be numpy arrays. Found argument of type {type(mat)}")
-        if mat.shape != shape:
-            raise ValueError(f"All arguments must have the same shape. Found argument with shape {mat.shape} and expected shape {shape}")
-
-    matrices = np.array([matrix] + list(args))
-
-    # Compute the average of all matrices
-    return np.mean(matrices, axis=0)
+    with open(path + '/results.tex', 'w') as f:
+        f.write(table)
 
 
-def visualize_cosine_similarity_matrix(matrix: np.ndarray, filename: str) -> None:
-    """Creates a magma heatmap of the cosine similarity matrix using matplotlib.
-    Shows row and column indexes to roughly identify layers. Similarity scores are listed in the cells.
-    Stores the visualization in ./results with the given filename.
-    Args:
-        matrix: A numpy array of shape (m, n) containing the cosine similarity values between the layers.
-        filename: The filename to save the heatmap. Saved in ./results with the given filename.
-    """
-    # Strip any file extensions from filename
-    filename = filename.split('.')[0]
+if __name__ == '__main__':
+    args = parse_args()
+    print(f"Aggregating results for RQ: {args.rq}, Threshold: {args.threshold}, Model: {args.model}, Dataset: {args.dataset}")
 
-    plt.imshow(matrix, cmap='magma', vmin=0, vmax=1)
-    plt.colorbar(label='Cosine Similarity')
-    plt.xlabel('Linearity Compression Model Layers')
-    plt.ylabel('Knowledge Distillation Model Layers')
-    plt.xticks(rotation=90)
-    plt.yticks(rotation=0)
-    plt.tight_layout()
-    plt.savefig(f"./results/{filename}.png")
-    plt.close()
+    path = f"./results/{args.rq}/{args.threshold}/{args.model[:-2]}/{args.dataset}/"
 
+    match (args.rq):
+        case 'rq1':
+            mean_results = mean_rq1_results(path)
+            print("Mean results:", mean_results)
+            generate_latex_results_table(mean_results, args, path)
+        case 'rq2':
+            print("RQ2 results aggregation not implemented yet.")
 
-def average_linearity_pruning_scores(scores: dict, *args) -> dict:
-    """Computes the average pruning or linearity scores for a number of dictionaries.
-    Args:
-        scores: A dictionary mapping layer names to scores.
-        *args: Any number of dictionaries with the same keys
-    Returns:
-        A dictionary mapping layer names to average scores.
-    """
-    # Verify all dicts have the same keys
-    original_keys = list(scores.keys())
-    for dictionary in args:
-        if type(dictionary) != dict:
-            raise ValueError(f"All arguments must be dictionaries. Found argument of type {type(dictionary)}")
-        if dictionary.keys() != original_keys:
-            raise ValueError(f"All arguments must have the same keys. Found argument with keys {dictionary.keys()} and expected keys {original_keys}")
-
-    avg_dict = {}
-    all_dicts = [scores] + list(args)
-    for key in original_keys:
-        avg_dict[key] = np.mean([dictionary[key] for dictionary in all_dicts])
-
-    return avg_dict
-
-
-def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_scores: dict, filename: str) -> None:
-    """Creates a scatterplot of the linearity compression scores and pruning scores for each layer.
-    Points are labeled with their layer index. X-axis will be linearity score, Y-axis will be pruning score.
-    Args:
-        linearity_scores: A dictionary mapping layer names to linear scores.
-        pruning_scores: A dictionary mapping layer names to pruning scores.
-        filename: The filename to save the scatterplot. Saved in ./results with the given filename.
-    """
-    # Strip any file extensions from filename
-    filename = filename.split('.')[0]
-
-    layer_names = list(linearity_scores.keys())
-    linearity_values = [linearity_scores[name] for name in layer_names]
-    pruning_values = [pruning_scores[name] for name in layer_names]
-
-    plt.figure(figsize=(10, 6))
-    plt.scatter(linearity_values, pruning_values)
-
-    for i, name in enumerate(layer_names):
-        plt.annotate(name, (linearity_values[i], pruning_values[i]))
-
-    plt.xlabel('Linearity Compression Score')
-    plt.ylabel('Pruning Score')
-    plt.title('Linearity Compression Scores vs Pruning Scores')
-    plt.grid()
-    plt.tight_layout()
-    plt.savefig(f"./results/{filename}.png")
-    plt.close()

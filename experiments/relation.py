@@ -82,11 +82,12 @@ def _collect_activations(model, x, layers):
     return activations
 
 
-def _center_gram(X):
+def _center_gram(K):
     """Center Gram matrix."""
-    n = X.size(0)
-    unit = torch.ones(n, n, device=X.device, dtype=X.dtype) / n
-    return X - unit @ X - X @ unit + unit @ X @ unit
+    row_mean = K.mean(dim=1, keepdim=True)
+    col_mean = K.mean(dim=0, keepdim=True)
+    total_mean = K.mean()
+    return K - row_mean - col_mean + total_mean
 
 
 def _linear_cka(X, Y):

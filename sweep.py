@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 import torch
 import wandb
+from huggingface_hub import login
 
 # Change wandb logging directory so IDEs don't confuse log directory for importable package
 os.environ['WANDB_DIR'] = './wandb_logs'
@@ -43,7 +44,7 @@ def parse_args():
                         help='Batch size for training and evaluation.')
     parser.add_argument('--epochs', type=int, default=[10,20,30], nargs='*',
                         help='Number of epochs for training and fine-tuning.')
-    parser.add_argument('--lr', type=float, default=[2e-4,2e-5], nargs='*',
+    parser.add_argument('--lr', type=float, default=[2e-4], nargs='*',
                         help='Learning rate for optimizer.')
     parser.add_argument('--max_batches', type=int, default=None,
                         help='Maximum number of batches to process during training/evaluation. ' +
@@ -112,6 +113,11 @@ if __name__ == '__main__':
             os.environ['WANDB_API_KEY'] = f.read().strip()
     else:
         logger.warning("No Weights and Biases API key provided.")
+
+    if os.path.exists('hf.login'):
+        login(token=open("hf.login").read().strip())
+    else:
+        logger.warning("No HuggingFace API key provided.")
 
     project_name = ""
     if args.wandb_project:
