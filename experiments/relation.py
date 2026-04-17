@@ -208,18 +208,18 @@ def visualize_cka_similarity_matrix(matrix, save_dir, layer_names, linearity_sco
     plt.savefig(f"{save_dir}/cka_similarity_heatmap.png")
     plt.close()
 
-def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_scores: dict, save_dir: str) -> None:
+def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios: dict, save_dir: str) -> None:
     """Creates a scatterplot of the linearity compression scores and pruning scores for each layer.
     Points are labeled with their layer index. X-axis will be linearity score, Y-axis will be pruning score.
     Args:
         linearity_scores: A dictionary mapping layer names to linear scores.
-        pruning_scores: A dictionary mapping layer names to pruning scores.
+        pruning_ratios: A dictionary mapping layer names to pruning scores.
         save_dir: The directory to save the scatterplot. Saved as "linearity_pruning_scatterplot.png" in the given directory.
     """
-    layer_names = list(set(linearity_scores.keys()).intersection(set(pruning_scores.keys())))
-    logger.info(f"Computing scatterplot for {len(layer_names)} layers out of total {len(linearity_scores) + len(pruning_scores)} layers.")
+    layer_names = list(set(linearity_scores.keys()).intersection(set(pruning_ratios.keys())))
+    logger.info(f"Computing scatterplot for {len(layer_names)} layers out of total {len(linearity_scores) + len(pruning_ratios)} layers.")
     linearity_values = [linearity_scores[name] for name in layer_names]
-    pruning_values = [pruning_scores[name] for name in layer_names]
+    pruning_values = [pruning_ratios[name] for name in layer_names]
 
     plt.figure(figsize=(10, 6))
     plt.scatter(linearity_values, pruning_values)

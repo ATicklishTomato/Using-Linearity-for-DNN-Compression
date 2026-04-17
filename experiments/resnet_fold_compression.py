@@ -232,9 +232,9 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Evaluate initial model performance
     # ------------------------------------------------------------
-    original_accuracy, original_param_count, original_inference_time, original_tflops = experimenter.validate_model()
+    original_accuracy, original_param_count, original_inference_time, original_gflops = experimenter.validate_model()
     logger.info(f"Original model accuracy: {original_accuracy:.4f}, parameters: {original_param_count}, "
-                f"inference time: {original_inference_time:.4f} seconds, tflops: {original_tflops}")
+                f"inference time: {original_inference_time:.4f} seconds, tflops: {original_gflops}")
 
     # ------------------------------------------------------------
     # Compute linearity scores
@@ -258,16 +258,16 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Evaluate folded model performance
     # ------------------------------------------------------------
-    compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_tflops = experimenter.validate_model()
+    compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = experimenter.validate_model()
     logger.info(f"Folded model accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, "
-                f"inference time: {compressed_inference_time:.4f} seconds, tflops: {compressed_tflops}")
+                f"inference time: {compressed_inference_time:.4f} seconds, tflops: {compressed_gflops}")
 
     accuracy_loss = utils.accuracy_loss(original_accuracy, compressed_accuracy)
     param_compression_ratio = utils.compression_ratio(original_param_count, compressed_param_count)
     speedup = utils.speedup(original_inference_time, compressed_inference_time)
-    tflop_reduction = utils.gflop_reduction(original_inference_time, compressed_inference_time)
+    gflop_reduction = utils.gflop_reduction(original_inference_time, compressed_inference_time)
     logger.info(f"Accuracy loss: {accuracy_loss:.4f}, Parameter compression ratio: {param_compression_ratio:.4f}, "
-                f"Speedup: {speedup:.4f}x, TFLOP reduction: {tflop_reduction:.4f}")
+                f"Speedup: {speedup:.4f}x, TFLOP reduction: {gflop_reduction:.4f}")
 
     # ------------------------------------------------------------
     # Log results to wandb and save models/results if enabled
@@ -283,14 +283,16 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
             "original_accuracy": original_accuracy,
             "original_param_count": original_param_count,
             "original_inference_time": original_inference_time,
+            "original_gflops": original_gflops,
             "compressed_accuracy": compressed_accuracy,
             "compressed_param_count": compressed_param_count,
             "compressed_inference_time": compressed_inference_time,
+            "compressed_gflops": compressed_gflops,
             "compressed_groups": folded_pairs,
             "accuracy_loss": accuracy_loss,
             "param_compression_ratio": param_compression_ratio,
             "speedup": speedup,
-            "gflop_reduction": tflop_reduction,
+            "gflop_reduction": gflop_reduction,
         }
         with open(f"{save_dir}/{model}_folding_results.json", "w") as f:
             json.dump(results, f, indent=4)
@@ -300,14 +302,16 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         "original_accuracy": original_accuracy,
         "original_param_count": original_param_count,
         "original_inference_time": original_inference_time,
+        "original_gflops": original_gflops,
         "compressed_accuracy": compressed_accuracy,
         "compressed_param_count": compressed_param_count,
         "compressed_inference_time": compressed_inference_time,
+        "compressed_gflops": compressed_gflops,
         "compressed_groups": folded_pairs,
         "accuracy_loss": accuracy_loss,
         "param_compression_ratio": param_compression_ratio,
         "speedup": speedup,
-        "gflop_reduction": tflop_reduction,
+        "gflop_reduction": gflop_reduction,
     }
 
     if sweep:
