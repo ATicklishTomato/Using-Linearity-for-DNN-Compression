@@ -14,13 +14,12 @@ logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 class LlamaExperimenter:
-    def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, max_batches=None, device='cuda'):
+    def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, device='cuda'):
         self.model_name = model_name
         self.data_handler = data_handler
         self.batch_size = batch_size
         self.epochs = epochs
         self.learning_rate = learning_rate
-        self.max_batches = max_batches if max_batches is not None else len(data_handler.train_set)
         self.device = device
 
         match model_name:
@@ -57,10 +56,7 @@ class LlamaExperimenter:
         for epoch in range(self.epochs):
             epoch_loss = 0.0
             batch_idx = 0
-            for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{self.epochs}", total=min(self.max_batches, len(train_loader)), leave=False, disable=debug_mode)):
-                if batch_idx >= self.max_batches:
-                    break
-
+            for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{self.epochs}", total=len(train_loader), leave=False, disable=debug_mode)):
                 optimizer.zero_grad()
 
                 inputs = self.data_handler.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(self.device)
@@ -78,7 +74,7 @@ class LlamaExperimenter:
                 epoch_loss += loss.item()
 
                 if batch_idx % 100 == 99:
-                    logger.info(f"Epoch {epoch+1}/{self.epochs} - Batch {batch_idx+1}/{min(self.max_batches, len(train_loader))} - Loss: {loss.item():.4f}")
+                    logger.info(f"Epoch {epoch+1}/{self.epochs} - Batch {batch_idx+1}/{len(train_loader)} - Loss: {loss.item():.4f}")
 
             avg_loss = epoch_loss / (batch_idx + 1)
             logger.info(f"Epoch {epoch+1}/{self.epochs} - Average Loss: {avg_loss:.4f}")
@@ -100,12 +96,8 @@ class LlamaExperimenter:
         top_k_correct = 0
         total = 0
         val_loader = DataLoader(self.data_handler.val_set, batch_size=self.batch_size, shuffle=False)
-        num_batches = min(self.max_batches, len(val_loader))
         with torch.no_grad():
-            for batch_idx, batch in enumerate(tqdm(val_loader, total=num_batches, desc="Validating LLaMA model", leave=False, disable=debug_mode)):
-                if batch_idx >= self.max_batches:
-                    break
-
+            for batch_idx, batch in enumerate(tqdm(val_loader, total=len(val_loader), desc="Validating LLaMA model", leave=False, disable=debug_mode)):
                 inputs = self.data_handler.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(self.device)
                 labels = inputs.input_ids.clone()
 

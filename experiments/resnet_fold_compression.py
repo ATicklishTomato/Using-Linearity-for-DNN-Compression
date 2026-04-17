@@ -197,7 +197,7 @@ def fold_linear_conv_sequences(
     return folded_pairs
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
-                           epochs: int, lr: float, max_batches: int, save: bool, seed: int, device: str, sweep: bool=False):
+                           epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str, sweep: bool=False):
     """Run the ResNet compression experiment. Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
     Args:
         model (str): The ResNet architecture to use (e.g., 'resnet18').
@@ -207,7 +207,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         batch_size (int): The batch size for training and evaluation.
         epochs (int): The number of epochs for fine-tuning.
         lr (float): The learning rate for the optimizer.
-        max_batches (int): The maximum number of batches to process during training/evaluation.
+        data_fraction (float): The fraction of the dataset to use for training and evaluation.
         save (bool): Whether to save the trained models and results.
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
@@ -219,10 +219,10 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Load data and model
     # ------------------------------------------------------------
-    logger.info(f"Running ResNet compression experiment with model={model}, linearity={linearity}, dataset={dataset}, threshold={threshold}, batch_size={batch_size}, epochs={epochs}, lr={lr}, max_batches={max_batches}, save={save}, seed={seed}, device={device}")
-    data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, reduction_fraction=0.1, seed=seed) # Reduce to 10% for faster experimentation
+    logger.info(f"Running ResNet compression experiment with model={model}, linearity={linearity}, dataset={dataset}, threshold={threshold}, batch_size={batch_size}, epochs={epochs}, lr={lr}, data fraction={data_fraction}, save={save}, seed={seed}, device={device}")
+    data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, data_fraction=data_fraction, seed=seed)
     logger.debug(f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
-    experimenter = ResNetExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, max_batches=max_batches, device=device)
+    experimenter = ResNetExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, device=device)
     logger.info("Model and data loaded, model fine-tuned.")
     if save:
         # Save finetuned original
@@ -239,7 +239,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Compute linearity scores
     # ------------------------------------------------------------
-    metric = LinearityMetric(linearity, model, data_handler, threshold, max_batches, device, save, save_dir)
+    metric = LinearityMetric(linearity, model, data_handler, threshold, device, save, save_dir)
     linearity_scores = metric.metric_fn(experimenter.model)
     logger.info("Linearity scores computed.")
     logger.debug(f"Linearity scores: {linearity_scores}")

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 
-def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, max_batches=100, lr=2e-5, batch_size=64, epochs=10):
+def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5, batch_size=64, epochs=10):
     """
     Wrapper function for pruning models based on their architecture.
     Args:
@@ -21,7 +21,6 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, max_batc
         data_handler:   DataManager object.
         device:         Device to use.
         pruning_ratio:  Pruning ratio.
-        max_batches:   Maximum number of batches to prune.
         lr:            Learning rate to use.
         batch_size:   Batch size to use.
         epochs:        Number of epochs to use.
@@ -38,13 +37,13 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, max_batc
         logger.info("Running ResNet pruning")
         prune_dict = prune_resnet(model, data_handler, device, pruning_ratio)
         logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
-        finetune_resnet(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device, max_batches=max_batches)
-        acc, param_count, inference_time, gflops = evaluate_resnet(model, data_handler, device, max_batches)
+        finetune_resnet(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device)
+        acc, param_count, inference_time, gflops = evaluate_resnet(model, data_handler, device)
     else:
         logger.info("Running Llama pruning")
         prune_dict = prune_llama(model, data_handler, device, pruning_ratio)
         logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
-        finetune_llama(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device, max_batches=max_batches)
+        finetune_llama(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device)
         acc, param_count, inference_time, gflops = evaluate_llama(model, data_handler)
 
     logger.info("Completed pruning evaluation")
@@ -225,7 +224,7 @@ def prune_resnet_struct(model, data_handler, device='cuda', pruning_ratio=0.5):
 
     return pruned_ratios
 
-def finetune_resnet(model, data_handler, lr=2e-5, batch_size=64, epochs=10, device='cuda', max_batches=100):
+def finetune_resnet(model, data_handler, lr=2e-5, batch_size=64, epochs=10, device='cuda'):
     """Finetune the ResNet model such that it can be used for linearity metric evaluations."""
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -236,10 +235,8 @@ def finetune_resnet(model, data_handler, lr=2e-5, batch_size=64, epochs=10, devi
     for epoch in range(epochs):
         epoch_loss = 0.0
         i = 0
-        for i, data in tqdm(enumerate(train_loader), total=min(len(train_loader), max_batches),
+        for i, data in tqdm(enumerate(train_loader), total=len(train_loader),
                             desc=f"Finetuning Epoch {epoch + 1}/{epochs}", leave=False, disable=debug_mode):
-            if i >= max_batches:
-                break
             inputs, labels = data
             inputs, labels = inputs.to(device), labels.to(device)
 
@@ -259,13 +256,12 @@ def finetune_resnet(model, data_handler, lr=2e-5, batch_size=64, epochs=10, devi
 
     logger.info("Finished finetuning the ResNet model.")
 
-def evaluate_resnet(model, data_handler, device='cuda', max_batches=100):
+def evaluate_resnet(model, data_handler, device='cuda'):
         """Validate the ResNet model and compute accuracy, parameter count, inference time, and GFLOPs.
         Args:
             model:          Model to be validated.
             data_handler:   DataManager object.
             device:         Device to use.
-            max_batches:  Maximum number of batches to use.
         Returns:
             accuracy:           Top-1 accuracy of the model on the validation set.
             param_count:        Number of parameters in the model on the validation set.
@@ -277,11 +273,8 @@ def evaluate_resnet(model, data_handler, device='cuda', max_batches=100):
         total = 0
         inference_time = 0
         data_loader = DataLoader(data_handler.val_set, batch_size=data_handler.batch_size, shuffle=False)
-        num_batches = min(max_batches, len(data_loader))
         with torch.no_grad():
-            for inputs, labels in tqdm(data_loader, total=num_batches, desc="Validating ResNet model", leave=False, disable=debug_mode):
-                if total >= max_batches * data_handler.batch_size:
-                    break
+            for inputs, labels in tqdm(data_loader, total=len(data_loader), desc="Validating ResNet model", leave=False, disable=debug_mode):
                 inputs = inputs.to(device)
                 labels = labels.to(device)
 
@@ -455,7 +448,7 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
 
     return pruned_ratios
 
-def finetune_llama(model, data_handler, lr=2e-5, batch_size=4, epochs=10, device='cuda', max_batches=100):
+def finetune_llama(model, data_handler, lr=2e-5, batch_size=4, epochs=10, device='cuda'):
     """Finetune the LLaMA model such that it can be used for linearity metric evaluations."""
 
     model.to(device).train()
@@ -467,11 +460,8 @@ def finetune_llama(model, data_handler, lr=2e-5, batch_size=4, epochs=10, device
         epoch_loss = 0.0
         batch_idx = 0
         for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}",
-                                               total=min(max_batches, len(train_loader)), leave=False,
+                                               total=len(train_loader), leave=False,
                                                disable=debug_mode)):
-            if batch_idx >= max_batches:
-                break
-
             optimizer.zero_grad()
 
             inputs = data_handler.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(
@@ -491,20 +481,19 @@ def finetune_llama(model, data_handler, lr=2e-5, batch_size=4, epochs=10, device
 
             if batch_idx % 100 == 99:
                 logger.info(
-                    f"Epoch {epoch + 1}/{epochs} - Batch {batch_idx + 1}/{min(max_batches, len(train_loader))} - Loss: {loss.item():.4f}")
+                    f"Epoch {epoch + 1}/{epochs} - Batch {batch_idx + 1}/{len(train_loader)} - Loss: {loss.item():.4f}")
 
         avg_loss = epoch_loss / (batch_idx + 1)
         logger.info(f"Epoch {epoch + 1}/{epochs} - Average Loss: {avg_loss:.4f}")
 
     logger.info("Finetuning of LLaMA model completed.")
 
-def evaluate_llama(model, data_handler, device='cuda', max_batches=100, top_k=5):
+def evaluate_llama(model, data_handler, device='cuda', top_k=5):
     """Validate the LLaMA model and compute accuracy, parameter count, average inference time per token, and GFLOPs.
     Args:
         model: LLaMA model
         data_handler: DataHandler object
         device: torch.device
-        max_batches: Maximum number of batches to use
         top_k (int, optional): The top k accuracy values. Defaults to 5.
     Returns:
         accuracy:           Top-k accuracy of the model on the validation set.
@@ -517,12 +506,8 @@ def evaluate_llama(model, data_handler, device='cuda', max_batches=100, top_k=5)
     top_k_correct = 0
     total = 0
     val_loader = DataLoader(data_handler.val_set, batch_size=data_handler.batch_size, shuffle=False)
-    num_batches = min(max_batches, len(val_loader))
     with torch.no_grad():
-        for batch_idx, batch in enumerate(tqdm(val_loader, total=num_batches, desc="Validating LLaMA model", leave=False, disable=debug_mode)):
-            if batch_idx >= max_batches:
-                break
-
+        for batch_idx, batch in enumerate(tqdm(val_loader, total=len(val_loader), desc="Validating LLaMA model", leave=False, disable=debug_mode)):
             inputs = data_handler.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(device)
             labels = inputs.input_ids.clone()
 

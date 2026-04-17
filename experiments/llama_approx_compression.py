@@ -135,8 +135,7 @@ def train_block_approximation(
     train_dataset,
     device,
     epochs=1,
-    lr=2e-4,
-    max_batches=200
+    lr=2e-4
 ):
     """
     Trains a linear approximation layer to mimic a section of a LLama model's attention blocks.
@@ -148,7 +147,6 @@ def train_block_approximation(
         device: The device to use.
         epochs: The number of epochs to train.
         lr: The learning rate to use.
-        max_batches: The maximum number of batches to use.
     Returns:
         The linear approximation layer trained to mimic the specified attention block layers.
     """
@@ -163,9 +161,7 @@ def train_block_approximation(
     approx.train().to(device)
 
     for epoch in range(epochs):
-        for i, batch in tqdm(enumerate(train_dataset), total=min(len(train_dataset), max_batches), desc=f"Training block {layer_group} Epoch {epoch}", leave=False, disable=debug_mode):
-            if i >= max_batches:
-                break
+        for i, batch in tqdm(enumerate(train_dataset), total=len(train_dataset), desc=f"Training block {layer_group} Epoch {epoch}", leave=False, disable=debug_mode):
 
             inputs = tokenizer(
                 batch["text"],
@@ -206,7 +202,7 @@ def train_block_approximation(
 
 
 def train_approximation_layers(experimenter, data_handler, groups, save_model: bool,
-                               epochs: int, lr: float, max_batches: int, device: str, save_path: str = None):
+                               epochs: int, lr: float, device: str, save_path: str = None):
     """Train linear approximations for specified layer groups in the model.
     Args:
         experimenter: The LlamaExperimenter instance containing the model to be compressed and its tokenizer.
@@ -215,7 +211,6 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
         save_model (bool): Whether to save the compressed model to disk.
         epochs (int): Number of epochs to train.
         lr (float): Learning rate for training.
-        max_batches (int): Maximum number of batches to process during training.
         device (str): The device to run the training on (e.g., 'cuda' or 'cpu').
         save_path (str): Path to save the compressed model to disk.
     Returns:
@@ -233,8 +228,7 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
                 data_handler.train_set,
                 device,
                 epochs=epochs,
-                lr=lr,
-                max_batches=max_batches
+                lr=lr
             )
             replace_attention_block(experimenter.model, layer_group, linear_block)
 
@@ -248,7 +242,7 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
 
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
-                           epochs: int, lr: float, max_batches: int, save: bool, seed: int, device: str, sweep: bool=False):
+                           epochs: int, lr: float, data_fraction: int, save: bool, seed: int, device: str, sweep: bool=False):
     """Run the Llama compression experiment. Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
     Args:
         model (str): The ResNet architecture to use (e.g., 'llama-2-7b').
@@ -258,7 +252,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         batch_size (int): The batch size for training and evaluation.
         epochs (int): The number of epochs for fine-tuning.
         lr (float): The learning rate for the optimizer.
-        max_batches (int): The maximum number of batches to process during training/evaluation.
+        data_fraction (int): The fraction of the dataset to use for training and evaluation (e.g., 0.05 for 5%).
         save (bool): Whether to save the trained models and results.
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
@@ -271,10 +265,10 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # Load data and model
     # ------------------------------------------------------------
     logger.info(
-        f"Running Llama compression experiment with model: {model}, linearity metric: {linearity}, dataset: {dataset}, threshold: {threshold}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, max batches: {max_batches}, save results: {save}, seed: {seed}, device: {device}")
-    data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, model_name=model, reduction_fraction=0.1, seed=seed) # Reduction fraction is set to 0.1 for faster experimentation, can be adjusted as needed
+        f"Running Llama compression experiment with model: {model}, linearity metric: {linearity}, dataset: {dataset}, threshold: {threshold}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, data fraction: {data_fraction}, save results: {save}, seed: {seed}, device: {device}")
+    data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, data_fraction=data_fraction, model_name=model, seed=seed)
     logger.debug(f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
-    experimenter = LlamaExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, max_batches=max_batches, device=device)
+    experimenter = LlamaExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, device=device)
     logger.info("Model initialized.")
     if save:
         # Save original finetuned model
@@ -292,7 +286,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Compute linearity scores
     # ------------------------------------------------------------
-    metric = LinearityMetric(linearity, model, data_handler, threshold, max_batches, device, save, save_dir)
+    metric = LinearityMetric(linearity, model, data_handler, threshold, device, save, save_dir)
     linearity_scores = metric.metric_fn(experimenter.model)
     logger.info("Linearity scores computed.")
     logger.debug(f"Linearity scores: {linearity_scores}")
@@ -305,7 +299,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     groups = group_contiguous_layers(linear_layers)
     train_approximation_layers(experimenter, data_handler, groups, save_model=save,
-                               epochs=epochs, lr=lr, max_batches=max_batches, device=device, save_path=save_dir)
+                               epochs=epochs, lr=lr, device=device, save_path=save_dir)
     logger.info("Linear approximation layers trained and integrated into the model.")
 
     # ------------------------------------------------------------

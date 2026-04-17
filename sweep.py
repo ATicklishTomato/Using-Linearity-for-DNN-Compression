@@ -46,9 +46,8 @@ def parse_args():
                         help='Number of epochs for training and fine-tuning.')
     parser.add_argument('--lr', type=float, default=[2e-4], nargs='*',
                         help='Learning rate for optimizer.')
-    parser.add_argument('--max_batches', type=int, default=None,
-                        help='Maximum number of batches to process during training/evaluation. ' +
-                                'If None, process all batches.')
+    parser.add_argument('--data_fraction', type=float, default=0.05,
+                        help='Fraction of data to use for training and evaluation.')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility.')
     parser.add_argument('--sweep_runs', type=int, default=20,
@@ -82,17 +81,17 @@ def sweep_train(config_defaults=None):
     if "llama" in generic_args.model and generic_args.experiment == "compression":
         from experiments.llama_approx_compression import run_experiment
         run_experiment(generic_args.model, generic_args.linearity, generic_args.dataset, wandb.config.threshold,
-                       generic_args.batch_size, generic_args.epochs, generic_args.lr, generic_args.max_batches,
+                       generic_args.batch_size, generic_args.epochs, generic_args.lr, generic_args.data_fraction,
                        False, generic_args.seed, generic_args.device, sweep=True)
     elif "resnet" in generic_args.model and generic_args.experiment == "compression":
         from experiments.resnet_fold_compression import run_experiment
         run_experiment(generic_args.model, generic_args.linearity, generic_args.dataset, wandb.config.threshold,
-                       generic_args.batch_size, generic_args.epochs, generic_args.lr, generic_args.max_batches,
+                       generic_args.batch_size, generic_args.epochs, generic_args.lr, generic_args.data_fraction,
                        False, generic_args.seed, generic_args.device, sweep=True)
     elif generic_args.experiment == "relation":
         from experiments.relation import run_experiment
         run_experiment(generic_args.model, generic_args.linearity, generic_args.dataset, generic_args.relation, wandb.config.batch_size, wandb.config.epochs,
-                       wandb.config.lr, generic_args.max_batches, False, generic_args.seed, generic_args.device,
+                       wandb.config.lr, generic_args.data_fraction, False, generic_args.seed, generic_args.device,
                        pruning_ratio=wandb.config.pruning_ratio, blocks=wandb.config.blocks, hidden_layer_reduction=wandb.config.hidden_layer_reduction)
     else:
         raise ValueError("Unknown model type.")

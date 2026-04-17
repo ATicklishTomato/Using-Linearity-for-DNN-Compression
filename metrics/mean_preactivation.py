@@ -109,12 +109,11 @@ def resnet_map(model, mean_preactivations):
                 mapped_mean_preactivations[name] = mean_preactivations.get(name, 0.0)  # Keep downsample layers as is
     return mapped_mean_preactivations
 
-def mean_preactivations(model, data_handler, max_batches=30, device='cuda', save=False, save_dir="./results"):
+def mean_preactivations(model, data_handler, device='cuda', save=False, save_dir="./results"):
     """Generic function that attempts to encompass both ResNet and Llama. This is done to avoid code duplication.
     Args:
         model: The neural network model.
         data_handler: The DataManager instance that provides access to the dataset and tokenizer (if applicable).
-        max_batches: Maximum number of batches to process from the dataset.
         device: Device to run the computations on.
         save: Whether to save/load the computed mean preactivations to/from disk.
         save_dir: Path to save the computed mean preactivations to/from disk.
@@ -158,24 +157,17 @@ def mean_preactivations(model, data_handler, max_batches=30, device='cuda', save
 
     logger.debug("Hooks registered. Performing forward passes...")
 
-    if max_batches is None:
-        num_batches = len(dataset)
-    elif len(dataset) is None:
-        num_batches = max_batches
-    else:
-        num_batches = min(max_batches, len(dataset))
-
     # Forward pass through the data
     with torch.no_grad():
         if "llama" in save_path.lower():
-            for i in tqdm(range(num_batches), desc="Processing samples for preactivations", leave=False, disable=debug_mode):
+            for i in tqdm(range(len(dataset)), desc="Processing samples for preactivations", leave=False, disable=debug_mode):
                 inputs = data_handler.tokenizer(dataset[i]['text'], return_tensors='pt', truncation=True, padding='max_length', max_length=512)
                 inputs = {k: v.to(device) for k, v in inputs.items()}
                 with torch.autocast("cuda", dtype=torch.bfloat16):
                     model(**inputs)
         else:
             data_loader = DataLoader(dataset, batch_size=data_handler.batch_size, shuffle=False, num_workers=0, pin_memory=True)
-            for inputs, _ in tqdm(data_loader, total=num_batches, desc="Computing mean preactivations", leave=False, disable=debug_mode):
+            for inputs, _ in tqdm(data_loader, total=len(dataset), desc="Computing mean preactivations", leave=False, disable=debug_mode):
                 inputs = inputs.to(device)
                 model(inputs)
 

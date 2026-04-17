@@ -109,7 +109,7 @@ def _linear_cka(X, Y):
     return (hsic / (norm_x * norm_y + 1e-8)).item()
 
 
-def cka_similarity_matrix(model_a, model_b, dataloader, device="cuda", max_batches=10, tokenizer=None):
+def cka_similarity_matrix(model_a, model_b, dataloader, device="cuda", tokenizer=None):
     """
     Computes a CKA similarity matrix between layers of two models.
 
@@ -118,7 +118,6 @@ def cka_similarity_matrix(model_a, model_b, dataloader, device="cuda", max_batch
         model_b: Second model (e.g. student)
         dataloader: DataLoader providing input batches
         device: device to run on
-        max_batches: number of batches to average over
         tokenizer: Optional tokenizer for text data (only needed if models are LLaMA)
     Returns:
         np.ndarray of shape (m, n)
@@ -138,9 +137,6 @@ def cka_similarity_matrix(model_a, model_b, dataloader, device="cuda", max_batch
 
     logger.info("Prepped for CKA computation, starting to collect activations and compute similarity matrix.")
     for i, x in enumerate(dataloader):
-        if i >= max_batches:
-            break
-
         if "resnet" in model_a.__class__.__name__.lower() or "resnet" in model_b.__class__.__name__.lower():
             x, _ = x
         else:
@@ -219,7 +215,7 @@ def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios:
     layer_names = list(set(linearity_scores.keys()).intersection(set(pruning_ratios.keys())))
     logger.info(f"Computing scatterplot for {len(layer_names)} layers out of total {len(linearity_scores) + len(pruning_ratios)} layers.")
     linearity_values = [linearity_scores[name] for name in layer_names]
-    pruning_values = [pruning_ratios[name] for name in layer_names]
+    pruning_values = [1 - pruning_ratios[name] for name in layer_names] # Invert ratios to show the fraction of pruned weights
 
     plt.figure(figsize=(10, 6))
     plt.scatter(linearity_values, pruning_values)
@@ -228,7 +224,7 @@ def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios:
         plt.annotate(name, (linearity_values[i], pruning_values[i]))
 
     plt.xlabel('Linearity Compression Score')
-    plt.ylabel('Pruning Score')
+    plt.ylabel('Pruning Ratio')
     plt.title('Linearity Compression Scores vs Pruning Scores')
     plt.grid()
     plt.tight_layout()
@@ -236,7 +232,7 @@ def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios:
     plt.close()
 
 def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, batch_size: int,
-                           epochs: int, lr: float, max_batches: int, save: bool, seed: int, device: str, pruning_ratio: float=0.1,
+                           epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str, pruning_ratio: float=0.1,
                    blocks: Union[None, list]=None, hidden_layer_reduction: int=2):
     """Run the relation to other compression methods experiment.
     Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
@@ -248,7 +244,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         batch_size (int): The batch size for training and evaluation.
         epochs (int): The number of epochs for fine-tuning.
         lr (float): The learning rate for the optimizer.
-        max_batches (int): The maximum number of batches to process during training/evaluation.
+        data_fraction (float): The fraction of the dataset to use for training.
         save (bool): Whether to save the trained models and results.
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
@@ -265,27 +261,26 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     # ------------------------------------------------------------
     if "resnet" in model:
         logger.info(
-            f"Running ResNet relation experiment with model={model}, linearity={linearity}, dataset={dataset}, relation_to={relation_to}, batch_size={batch_size}, epochs={epochs}, lr={lr}, max_batches={max_batches}, save={save}, seed={seed}, device={device}")
-        data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, reduction_fraction=0.1,
-                                   seed=seed)  # Reduce to 10% for faster experimentation
+            f"Running ResNet relation experiment with model={model}, linearity={linearity}, dataset={dataset}, relation_to={relation_to}, batch_size={batch_size}, epochs={epochs}, lr={lr}, data fraction: {data_fraction}, save={save}, seed={seed}, device={device}")
+        data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, data_fraction=data_fraction,
+                                   seed=seed)
         logger.debug(
             f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
         experimenter = ResNetExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs,
-                                          learning_rate=lr, max_batches=max_batches, device=device)
+                                          learning_rate=lr, device=device)
         if save:
             # Save finetuned original
             torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_original.pth")
             logger.info(f"Saved finetuned original model to {save_dir}/{model}_original.pth")
     elif "llama" in model:
         logger.info(
-            f"Running Llama compression experiment with model: {model}, linearity metric: {linearity}, dataset: {dataset}, relation_to={relation_to}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, max batches: {max_batches}, save results: {save}, seed: {seed}, device: {device}")
-        data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, model_name=model,
-                                   reduction_fraction=0.1,
-                                   seed=seed)  # Reduction fraction is set to 0.1 for faster experimentation, can be adjusted as needed
+            f"Running Llama compression experiment with model: {model}, linearity metric: {linearity}, dataset: {dataset}, relation_to={relation_to}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, data fraction: {data_fraction}, save results: {save}, seed: {seed}, device: {device}")
+        data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, data_fraction=data_fraction, model_name=model,
+                                   seed=seed)
         logger.debug(
             f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
         experimenter = LlamaExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size,
-                                         epochs=epochs, learning_rate=lr, max_batches=max_batches, device=device)
+                                         epochs=epochs, learning_rate=lr, device=device)
         if save:
             experimenter.model.save_pretrained(f"{save_dir}/original_{model}")
             logger.info(f"Original finetuned model saved to {save_dir}/original_{model}")
@@ -297,7 +292,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     # Compute linearity scores
     # ------------------------------------------------------------
     # We hardcode threshold because we don't care about the split in this case
-    metric = LinearityMetric(linearity, model, data_handler, "50%", max_batches, device, save, save_dir)
+    metric = LinearityMetric(linearity, model, data_handler, "50%", device, save, save_dir)
     linearity_scores = metric.metric_fn(experimenter.model)
     logger.info("Linearity scores computed.")
     logger.debug(f"Linearity scores: {linearity_scores}")
@@ -313,16 +308,14 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         case 'magnitude_pruning':
             from compression_methods.magnitude_pruning import prune
             prune_dict, acc, param, infer, gflops = prune(experimenter, data_handler, device=device,
-                                                                          pruning_ratio=pruning_ratio, max_batches=max_batches,
-                                                                          lr=lr, batch_size=batch_size, epochs=epochs)
+                                                                          pruning_ratio=pruning_ratio, lr=lr,
+                                                          batch_size=batch_size, epochs=epochs)
         case 'basic_kd':
             from compression_methods.basic_kd import distill
             if blocks is None:
                 blocks = [1,1,2,2]
             student_model, acc, param, infer, gflops = distill(experimenter, data_handler,device=device,
-                                                                                   lr=lr, epochs=epochs,
-                                                                                   max_batches=max_batches,
-                                                                                   blocks=blocks,
+                                                                                   lr=lr, epochs=epochs, blocks=blocks,
                                                                                    hidden_layer_reduction=hidden_layer_reduction)
 
     # --------------------------------------------------------------
@@ -334,7 +327,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         logger.info("Saved linearity vs pruning scatterplot.")
     if student_model is not None:
         data_loader = DataLoader(data_handler.val_set, batch_size=batch_size, shuffle=False)
-        matrix, parent_layer_names, _ = cka_similarity_matrix(experimenter.model, student_model, data_loader, device=device, max_batches=max_batches, tokenizer=data_handler.tokenizer if "llama" in model else None)
+        matrix, parent_layer_names, _ = cka_similarity_matrix(experimenter.model, student_model, data_loader, device=device, tokenizer=data_handler.tokenizer if "llama" in model else None)
         visualize_cka_similarity_matrix(matrix, save_dir, parent_layer_names, linearity_scores)
         logger.info("Saved cka similarity heatmap.")
 

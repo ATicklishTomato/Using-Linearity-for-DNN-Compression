@@ -71,20 +71,17 @@ def load_teacher_into_student(teacher, student):
     return student
 
 
-def train_student_resnet(teacher_model, student_model, data_handler, optimizer, device='cuda', epochs=5, max_batches=100):
+def train_student_resnet(teacher_model, student_model, data_handler, optimizer, device='cuda', epochs=5):
     teacher_model.to(device).eval()
     student_model.to(device).train()
 
     criterion = ForwardKLLoss()
     train_loader = DataLoader(data_handler.train_set, batch_size=data_handler.batch_size, shuffle=True)
-    num_batches = min(max_batches, len(train_loader))
     total = 0
     for epoch in range(epochs):
         total_loss = 0.0
-        for inputs, labels in tqdm(train_loader, total=num_batches, desc="Training student ResNet model", leave=False,
+        for inputs, labels in tqdm(train_loader, total=len(train_loader), desc="Training student ResNet model", leave=False,
                                    disable=debug_mode):
-            if total >= max_batches * data_handler.batch_size:
-                break
             inputs, labels = inputs.to(device), labels.to(device)
 
             with torch.no_grad():
@@ -103,13 +100,12 @@ def train_student_resnet(teacher_model, student_model, data_handler, optimizer, 
         avg_loss = total_loss / len(train_loader)
         logger.info(f'Epoch [{epoch+1}/{epochs}], Loss: {avg_loss:.4f}')
 
-def evaluate_student_resnet(student_model, data_handler, device='cuda', max_batches=100):
+def evaluate_student_resnet(student_model, data_handler, device='cuda'):
     """Validate the student ResNet model and compute accuracy, parameter count, inference time, and GFLOPs.
     Args:
         student_model: ResNet model
         data_handler: DataHandler object
         device: torch.device
-        max_batches: maximum number of batches
     Returns:
         accuracy:           Top-1 accuracy of the model on the validation set.
         param_count:        Number of parameters in the model on the validation set.
@@ -121,12 +117,9 @@ def evaluate_student_resnet(student_model, data_handler, device='cuda', max_batc
     total = 0
     inference_time = 0
     data_loader = DataLoader(data_handler.val_set, batch_size=data_handler.batch_size, shuffle=False)
-    num_batches = min(max_batches, len(data_loader))
     with torch.no_grad():
-        for inputs, labels in tqdm(data_loader, total=num_batches, desc="Validating student ResNet model", leave=False,
+        for inputs, labels in tqdm(data_loader, total=len(data_loader), desc="Validating student ResNet model", leave=False,
                                    disable=debug_mode):
-            if total >= max_batches * data_handler.batch_size:
-                break
             inputs = inputs.to(device)
             labels = labels.to(device)
 
@@ -153,7 +146,7 @@ def evaluate_student_resnet(student_model, data_handler, device='cuda', max_batc
     return accuracy, param_count, inference_time, gflops
 
 
-def distill_student_resnet(experimenter, data_handler, device='cuda', lr=2e-5, epochs=5, max_batches=100, blocks=None):
+def distill_student_resnet(experimenter, data_handler, device='cuda', lr=2e-5, epochs=5, blocks=None):
     """Distill a student ResNet model from a teacher ResNet model.
     Args:
         experimenter: Experimenter object
@@ -161,7 +154,6 @@ def distill_student_resnet(experimenter, data_handler, device='cuda', lr=2e-5, e
         device: torch.device
         lr: learning rate
         epochs: number of epochs
-        max_batches: maximum number of batches
         blocks: The blocks list to be passed to ResNet constructor. Default is None, gets set to [2,2,2], aka one block of 2 less than ResNet-18
     Returns:
         student_model: ResNet model
@@ -178,11 +170,10 @@ def distill_student_resnet(experimenter, data_handler, device='cuda', lr=2e-5, e
 
     train_student_resnet(teacher_model, student_model, data_handler,
                          torch.optim.Adam(student_model.parameters(), lr=lr),
-                         device=device, epochs=epochs, max_batches=max_batches)
+                         device=device, epochs=epochs)
     logger.info("Finished training student ResNet model.")
 
-    accuracy, param_count, inference_time, gflops = evaluate_student_resnet(student_model, data_handler,
-                                                                            device=device, max_batches=max_batches)
+    accuracy, param_count, inference_time, gflops = evaluate_student_resnet(student_model, data_handler, device=device)
     logger.info(f"Finished evaluating student ResNet model. Accuracy: {accuracy}, Params: {param_count}, Inference Time: {inference_time}, GFLOPs: {gflops}")
 
     return student_model, accuracy, param_count, inference_time, gflops
@@ -202,7 +193,7 @@ def get_student_llama(parent_model, hidden_layer_reduction=2):
 
     return student_model
 
-def train_student_llama(teacher_model, student_model, data_handler, optimizer, device='cuda', epochs=5, max_batches=100):
+def train_student_llama(teacher_model, student_model, data_handler, optimizer, device='cuda', epochs=5):
     """Train a student Llama model from a teacher Llama model.
     Args:
         teacher_model: Llama model
@@ -211,22 +202,17 @@ def train_student_llama(teacher_model, student_model, data_handler, optimizer, d
         optimizer: torch.optim.Optimizer
         device: torch.device
         epochs: number of epochs
-        max_batches: maximum number of batches
     """
     teacher_model.to(device).eval()
     student_model.to(device).train()
 
     criterion = ForwardKLLoss()
     train_loader = DataLoader(data_handler.train_set, batch_size=data_handler.batch_size, shuffle=True)
-    num_batches = min(max_batches, len(train_loader))
     total = 0
     for epoch in range(epochs):
         total_loss = 0.0
         for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}",
-                                               total=num_batches, leave=False, disable=debug_mode)):
-            if batch_idx >= max_batches:
-                break
-
+                                               total=len(train_loader), leave=False, disable=debug_mode)):
             optimizer.zero_grad()
             inputs = data_handler.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(
                 device)
@@ -249,13 +235,12 @@ def train_student_llama(teacher_model, student_model, data_handler, optimizer, d
         avg_loss = total_loss / len(train_loader)
         logger.info(f'Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.4f}')
 
-def evaluate_student_llama(student_model, data_handler, device='cuda', max_batches=100, top_k=5):
+def evaluate_student_llama(student_model, data_handler, device='cuda', top_k=5):
     """Evaluate a student Llama model from a teacher Llama model.
     Args:
         student_model: Llama model
         data_handler: DataManager object
         device: torch.device
-        max_batches: maximum number of batches
         top_k: number of top k to check accuracy
     Returns:
         accuracy: Top-k accuracy of the model on the validation set.
@@ -268,13 +253,9 @@ def evaluate_student_llama(student_model, data_handler, device='cuda', max_batch
     top_k_correct = 0
     total = 0
     val_loader = DataLoader(data_handler.val_set, batch_size=data_handler.batch_size, shuffle=False)
-    num_batches = min(max_batches, len(val_loader))
     with torch.no_grad():
         for batch_idx, batch in enumerate(
-                tqdm(val_loader, total=num_batches, desc="Validating LLaMA model", leave=False, disable=debug_mode)):
-            if batch_idx >= max_batches:
-                break
-
+                tqdm(val_loader, total=len(val_loader), desc="Validating LLaMA model", leave=False, disable=debug_mode)):
             inputs = data_handler.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(
                 device)
             labels = inputs.input_ids.clone()
@@ -322,7 +303,7 @@ def evaluate_student_llama(student_model, data_handler, device='cuda', max_batch
 
     return accuracy, param_count, avg_inference_time, gflops
 
-def distill_student_llama(experimenter, data_handler, device='cuda', lr=2e-5, epochs=5, max_batches=100,
+def distill_student_llama(experimenter, data_handler, device='cuda', lr=2e-5, epochs=5,
                           hidden_layer_reduction=2, top_k=5):
     """Evaluate a student Llama model from a teacher Llama model.
     Args:
@@ -331,7 +312,6 @@ def distill_student_llama(experimenter, data_handler, device='cuda', lr=2e-5, ep
         device: torch.device
         lr: learning rate
         epochs: number of epochs
-        max_batches: maximum number of batches
         hidden_layer_reduction: number of hidden layers to remove for student Llama model.
         top_k: number of top k to check accuracy
     Returns:
@@ -347,16 +327,15 @@ def distill_student_llama(experimenter, data_handler, device='cuda', lr=2e-5, ep
 
     train_student_llama(teacher_model, student_model, data_handler,
                          torch.optim.Adam(student_model.parameters(), lr=lr),
-                         device=device, epochs=epochs, max_batches=max_batches)
+                         device=device, epochs=epochs)
     logger.info("Finished training student LLaMA model.")
 
-    accuracy, param_count, inference_time, gflops = evaluate_student_llama(student_model, data_handler, device=device,
-                                                                           max_batches=max_batches, top_k=top_k)
+    accuracy, param_count, inference_time, gflops = evaluate_student_llama(student_model, data_handler, device=device, top_k=top_k)
     logger.info(f"Finished evaluating student LLaMA model. Accuracy: {accuracy}, Params: {param_count}, Inference Time: {inference_time}, GFLOPs: {gflops}")
 
     return student_model, accuracy, param_count, inference_time, gflops
 
-def distill(experimenter, data_handler, device='cuda', lr=2e-5, epochs=5, max_batches=100, top_k=5, blocks=None,
+def distill(experimenter, data_handler, device='cuda', lr=2e-5, epochs=5, top_k=5, blocks=None,
             hidden_layer_reduction=2):
     """Wrapper for the two distillation functions. Relevant function is determined based on model_name in experimenter.
     Args:
@@ -365,7 +344,6 @@ def distill(experimenter, data_handler, device='cuda', lr=2e-5, epochs=5, max_ba
         device: torch.device
         lr: learning rate
         epochs: number of epochs
-        max_batches: maximum number of batches
         top_k: number of top k to check accuracy. Only used for Llama model.
         blocks: Blocks layout for the student ResNet model. Default is [2,2,2]. Ignored for Llama model.
         hidden_layer_reduction: Number of hidden layers to remove for student Llama model. Default is 2, meaning that 18 layers of Llama-3.2-1b will become 16 layers. Ignored for ResNet model.
@@ -377,8 +355,9 @@ def distill(experimenter, data_handler, device='cuda', lr=2e-5, epochs=5, max_ba
         gflops: GFLOPs of the model on the validation set.
     """
     if "resnet" in experimenter.model_name:
-        return distill_student_resnet(experimenter, data_handler, device=device, lr=lr, epochs=epochs, max_batches=max_batches)
+        return distill_student_resnet(experimenter, data_handler, device=device, lr=lr, epochs=epochs, blocks=blocks)
     elif "llama" in experimenter.model_name:
-        return distill_student_llama(experimenter, data_handler, device=device, lr=lr, epochs=epochs, max_batches=max_batches, top_k=top_k)
+        return distill_student_llama(experimenter, data_handler, device=device, lr=lr, epochs=epochs,
+                                     hidden_layer_reduction=hidden_layer_reduction, top_k=top_k)
     else:
         raise ValueError(f"Unknown model name: {experimenter.model_name}")

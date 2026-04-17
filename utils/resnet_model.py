@@ -14,13 +14,12 @@ logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 class ResNetExperimenter:
-    def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, max_batches=None, device='cuda'):
+    def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, device='cuda'):
         self.model_name = model_name
         self.data_handler = data_handler
         self.batch_size = batch_size
         self.epochs = epochs
         self.learning_rate = learning_rate
-        self.max_batches = max_batches if max_batches is not None else len(data_handler.train_set)
         self.device = device
 
         match model_name:
@@ -62,10 +61,8 @@ class ResNetExperimenter:
         for epoch in range(self.epochs):
             epoch_loss = 0.0
             i = 0
-            for i, data in tqdm(enumerate(train_loader), total=min(len(train_loader), self.max_batches),
+            for i, data in tqdm(enumerate(train_loader), total=len(train_loader),
                                 desc=f"Finetuning Epoch {epoch+1}/{self.epochs}", leave=False, disable=debug_mode):
-                if i >= self.max_batches:
-                    break
                 inputs, labels = data
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
 
@@ -98,11 +95,8 @@ class ResNetExperimenter:
         total = 0
         inference_time = 0
         data_loader = DataLoader(self.data_handler.val_set, batch_size=self.batch_size, shuffle=False)
-        num_batches = min(self.max_batches, len(data_loader))
         with torch.no_grad():
-            for inputs, labels in tqdm(data_loader, total=num_batches, desc="Validating ResNet model", leave=False, disable=debug_mode):
-                if total >= self.max_batches * self.batch_size:
-                    break
+            for inputs, labels in tqdm(data_loader, total=len(data_loader), desc="Validating ResNet model", leave=False, disable=debug_mode):
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
 

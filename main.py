@@ -50,9 +50,8 @@ def parse_args():
                         help='Number of epochs for training and fine-tuning.')
     parser.add_argument('--lr', type=float, default=5e-5,
                         help='Learning rate for optimizer.')
-    parser.add_argument('--max_batches', type=int, default=None,
-                        help='Maximum number of batches to process during training/evaluation. ' +
-                                'If None, process all batches.')
+    parser.add_argument('--data_fraction', type=float, default=0.05,
+                        help='Fraction of data to use for training and evaluation.')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility.')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
@@ -89,7 +88,7 @@ if __name__ == '__main__':
         'batch_size': args.batch_size,
         'epochs': args.epochs,
         'learning_rate': args.lr,
-        'max_batches': args.max_batches,
+        'data_fraction': args.data_fraction,
     }
 
     if os.path.exists('wandb.login'):
@@ -132,19 +131,19 @@ if __name__ == '__main__':
         case ('llama-2-7b' | 'llama-2-13b' | 'llama-3-1b' | 'llama-3-3b', 'compression'):
             from experiments.llama_approx_compression import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
-                           args.epochs, args.lr, args.max_batches, args.save, args.seed, args.device)
+                           args.epochs, args.lr, args.data_fraction, args.save, args.seed, args.device)
         case ('resnet18' | 'resnet34' | 'resnet50', 'compression'):
             from experiments.resnet_fold_compression import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
-                           args.epochs, args.lr, args.max_batches, args.save, args.seed, args.device)
+                           args.epochs, args.lr, args.data_fraction, args.save, args.seed, args.device)
         case (_, 'benchmark_compression'):
             from experiments.benchmark_compression import benchmark_compression_methods
             benchmark_compression_methods(args.model, args.dataset, args.batch_size, args.epochs, args.lr,
-                                          args.max_batches, args.save, args.seed, args.device)
+                                          args.data_fraction, args.save, args.seed, args.device)
         case (_, 'relation'):
             from experiments.relation import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.relation, args.batch_size, args.epochs, args.lr,
-                                          args.max_batches, args.save, args.seed, args.device)
+                                          args.data_fraction, args.save, args.seed, args.device)
         case _:
             logger.error("Invalid combination of model, experiment, and relation.")
             raise ValueError("Invalid combination of model, experiment, and relation.")

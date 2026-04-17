@@ -15,7 +15,7 @@ from utils.resnet_model import ResNetExperimenter
 
 logger = logging.getLogger(__name__)
 
-def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, max_batches, save, seed, device,
+def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, data_fraction, save, seed, device,
                                   pruning_ratio=0.5, blocks=None, hidden_layer_reduction=2, return_for_relation=False):
     """
     Run other compression methods on a given model and dataset to compare performance against linearity-based compression.
@@ -25,7 +25,7 @@ def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, m
         batch_size (int): The batch size for training and evaluation.
         epochs (int): The number of epochs for fine-tuning.
         lr (float): The learning rate for the optimizer.
-        max_batches (int): The maximum number of batches to process during training/evaluation.
+        data_fraction (float): Fraction of data to use in training and evaluation.
         save (bool): Whether to save the trained models and results.
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
@@ -42,24 +42,23 @@ def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, m
     os.makedirs(save_dir, exist_ok=True)
 
     # Load the model and dataset
-    data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, model_name=model_name if "llama" in model_name else None,
-                               reduction_fraction=0.1, seed=seed)  # Reduction fraction is set to 0.1 for faster experimentation, can be adjusted as needed
+    data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, data_fraction=data_fraction, model_name=model_name if "llama" in model_name else None,
+                               seed=seed)
     logger.debug(
         f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
     if "llama" in model_name:
         experimenter = LlamaExperimenter(model_name=model_name, data_handler=data_handler, batch_size=batch_size, epochs=epochs,
-                                         learning_rate=lr, max_batches=max_batches, device=device)
+                                         learning_rate=lr, device=device)
     elif "resnet" in model_name:
         experimenter = ResNetExperimenter(model_name=model_name, data_handler=data_handler, batch_size=batch_size,
-                                          epochs=epochs, learning_rate=lr, max_batches=max_batches, device=device)
+                                          epochs=epochs, learning_rate=lr,  device=device)
     else:
         raise ValueError(f"Unknown model name: {model_name}")
     logger.info("Model initialized.")
 
     # Run magnitude pruning
     prune_dict, mag_acc, mag_param, mag_infer, mag_gflops = prune(experimenter, data_handler, device=device,
-                                                                  pruning_ratio=pruning_ratio, max_batches=max_batches,
-                                                                  lr=lr, batch_size=batch_size, epochs=epochs)
+                                                                  pruning_ratio=pruning_ratio, lr=lr, batch_size=batch_size, epochs=epochs)
     logger.info(f"Magnitude pruning completed. Acc: {mag_acc}, param: {mag_param}, infer: {mag_infer}, gflops: {mag_gflops}")
     logger.info(prune_dict)
 
@@ -74,8 +73,7 @@ def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, m
 
     # Run distillation
     student_model, dist_acc, dist_param, dist_infer, dist_gflops = distill(experimenter, data_handler, device=device,
-                                                               lr=lr, epochs=epochs, max_batches=max_batches,
-                                                               blocks=blocks, hidden_layer_reduction=hidden_layer_reduction)
+                                                               lr=lr, epochs=epochs, blocks=blocks, hidden_layer_reduction=hidden_layer_reduction)
     student_model.cpu()
     logger.info(f"Distillation completed. Acc: {dist_acc}, param: {dist_param}, infer: {dist_infer}, gflops: {dist_gflops}")
 

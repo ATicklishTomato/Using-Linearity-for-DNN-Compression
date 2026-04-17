@@ -6,14 +6,14 @@ logger = logging.getLogger(__name__)
 
 
 class DataManager:
-    def __init__(self, dataset_name, batch_size, model_name=None, reduction_fraction=0.1, seed=42):
+    def __init__(self, dataset_name, batch_size, data_fraction, model_name=None, seed=42):
         """
         Encapsulating class that manages the loading and preprocessing of datasets for different experiments.
         Args:
             dataset_name (str): Name of the dataset.
             batch_size (int): Batch size for training and evaluation.
+            data_fraction (float): Fraction of data to be used for training and evaluation.
             model_name (str, optional): Name of the model to determine the tokenizer to preload. Required for text datasets. Defaults to None.
-            reduction_fraction (float, optional): Fraction of the dataset to use for faster experimentation. Defaults to 0.1.
             seed (int, optional): Random seed for reproducibility when reducing the dataset. Defaults to 42.
         """
         if logger.getEffectiveLevel() != logging.DEBUG:
@@ -47,12 +47,12 @@ class DataManager:
                 logger.info(f"Tokenizer initialized with pretrained model: {model_name}")
 
                 from utils.tinystories import load_datasets
-                self.train_set, self.val_set = load_datasets(self.tokenizer, self.batch_size, reduction_fraction, seed)
+                self.train_set, self.val_set = load_datasets(self.tokenizer, self.batch_size, data_fraction, seed)
             case "imagenet":
                 from utils.imagenet import load_datasets
-                self.train_set, self.val_set = load_datasets(reduction_fraction, seed)
+                self.train_set, self.val_set = load_datasets(data_fraction, seed)
             case _:
                 raise ValueError(f"Unsupported dataset: {dataset_name}.")
 
 
-        logger.info(f"DataManager initialized with dataset: {dataset_name}, batch size: {batch_size}, model name: {model_name}, reduction fraction: {reduction_fraction}, seed: {seed}.")
+        logger.info(f"DataManager initialized with dataset: {dataset_name}, batch size: {batch_size}, data fraction: {data_fraction}, model name: {model_name}, seed: {seed}.")
