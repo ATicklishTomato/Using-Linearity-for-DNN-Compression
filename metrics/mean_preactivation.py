@@ -75,6 +75,9 @@ def resnet_hook(module, input, output, channel_sums, sample_counts, name):
     Returns:
         None. The function updates the channel_sums and sample_counts dictionaries in place.
         """
+    if isinstance(input, tuple):
+        # cifar10 has single item tuples around its embeddings for some reason
+        input = input[0]
     # output shape: [B, C, H, W]
     B = input.shape[0]
 
