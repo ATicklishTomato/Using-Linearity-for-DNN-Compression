@@ -1,6 +1,7 @@
 import torch
 import logging
 from metrics.mean_preactivation import mean_preactivations
+from metrics.fraction import fraction_of_activation
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +34,12 @@ class LinearityMetric:
                                                                          device=self.device, save=self.save, save_dir=self.save_dir)
             case ("llama-2-7b" | "llama-2-13b" | "llama-3-1b" | "llama-3-3b", "procrustes"):
                 raise NotImplementedError("Procrustes metric not implemented for Llama yet.")
-            case ("llama-2-7b" | "llama-2-13b" | "llama-3-1b" | "llama-3-3b", "fraction"):
-                raise NotImplementedError("Fraction metric not implemented for Llama yet.")
+            case (_, "fraction"):
+                self.metric_fn = lambda model: fraction_of_activation(model, self.data_handler,
+                                                                   device=self.device, save=self.save,
+                                                                   save_dir=self.save_dir)
             case("resnet18" | "resnet34" | "resnet50", "procrustes"):
                 raise NotImplementedError("Procrustes metric not implemented for Resnet yet.")
-            case("resnet18" | "resnet34" | "resnet50", "fraction"):
-                raise NotImplementedError("Fraction metric not implemented for Resnet yet.")
             case _:
                 raise ValueError(f"Unsupported model and metric combination: {model_name} and {metric_name}.")
 

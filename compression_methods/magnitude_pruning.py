@@ -125,7 +125,7 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
     # ---------------------------------------------------------
     pruned_ratios = {}
     for name in original_counts:
-        pruned_ratios[name] = pruned_counts[name] / original_counts[name]
+        pruned_ratios[name] = 1 - (pruned_counts[name] / original_counts[name]) # We want fraction of pruned weights
 
     model.eval()
     torch.cuda.empty_cache()
@@ -218,7 +218,7 @@ def prune_resnet_struct(model, data_handler, device='cuda', pruning_ratio=0.5):
 
     pruned_ratios = {}
     for name, original_param_count in original_param_counts.items():
-        pruned_ratios[name] = pruned_param_counts[name] / original_param_count
+        pruned_ratios[name] = 1 - (pruned_param_counts[name] / original_param_count) # We want fraction of pruned weights
 
     logger.info("Computed pruned ratios. Finished pruning")
 
@@ -401,7 +401,7 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
                 + down_mask.sum().item()
         )
 
-        pruned_ratios[f"model.layers.{i}.self_attn"] = after / before
+        pruned_ratios[f"model.layers.{i}.self_attn"] =  1 - (after / before) # We want fraction of pruned weights
 
 
     model.config.hidden_size = model.lm_head.in_features

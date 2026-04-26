@@ -1,4 +1,4 @@
-import os
+import json
 import re
 import logging
 import torch
@@ -76,10 +76,10 @@ def resnet_hook(module, input, output, channel_sums, sample_counts, name):
         None. The function updates the channel_sums and sample_counts dictionaries in place.
         """
     # output shape: [B, C, H, W]
-    B = output.shape[0]
+    B = input.shape[0]
 
     # spatial + batch mean, but keep channels
-    per_channel_batch_mean = output.mean(dim=(0, 2, 3))  # [C]
+    per_channel_batch_mean = input.mean(dim=(0, 2, 3))  # [C]
 
     if name not in channel_sums:
         channel_sums[name] = per_channel_batch_mean.detach().clone() * B
@@ -196,8 +196,8 @@ def mean_preactivations(model, data_handler, device='cuda', save=False, save_dir
         mean_preactivations = resnet_map(model, mean_preactivations)
 
     if save:
-        torch.save(mean_preactivations, save_path)
-        logger.info("Mean preactivations saved to disk.")
+        json.dump(mean_preactivations, open(f"{save_dir}/mean_preactivations.json", "w"))
+        logger.info(f"Saved mean preactivations to {save_dir}/mean_preactivations.json")
 
     logger.info("Mean preactivations computed.")
 

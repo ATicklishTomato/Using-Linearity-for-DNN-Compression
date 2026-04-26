@@ -26,7 +26,7 @@ def parse_args():
                              '`procrustes` refers to the Procrustes similarity-based metric as defined by Razzhigaev et al (2024). ' +
                              '`fraction` refers to the fraction of neurons that is activated by an activation function.')
     parser.add_argument('-d', '--dataset', type=str,
-                        choices=['imagenet', 'tinystories'],
+                        choices=['imagenet', 'tinystories', 'cifar10'],
                         default='imagenet',
                         help='Dataset to use for training and evaluation.')
     parser.add_argument('-e', '--experiment', type=str,
@@ -83,6 +83,7 @@ if __name__ == '__main__':
         'model': args.model,
         'dataset': args.dataset,
         'experiment': args.experiment,
+        'linearity': args.linearity,
         'relation': args.relation,
         'seed': args.seed,
         'batch_size': args.batch_size,

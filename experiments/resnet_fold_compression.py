@@ -213,7 +213,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
         sweep (bool): Flag that indicates whether an additional metric should be computed to use for a W&B sweep.
     """
-    save_dir = "./results/rq1/" + threshold.split(".")[-1].split("%")[0] + "/resnet/" + dataset + "/" + str(seed)
+    save_dir = "./results/rq1/" + linearity + "/" + threshold.split(".")[-1].split("%")[0] + "/resnet/" + dataset + "/" + str(seed)
     os.makedirs(save_dir, exist_ok=True)
 
     # ------------------------------------------------------------

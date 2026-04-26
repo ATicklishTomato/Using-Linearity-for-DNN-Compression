@@ -51,8 +51,12 @@ class DataManager:
             case "imagenet":
                 from utils.imagenet import load_datasets
                 self.train_set, self.val_set = load_datasets(data_fraction, seed)
+            case "cifar10":
+                from utils.cifar10 import load_datasets
+                self.train_set, self.val_set = load_datasets(data_fraction, seed)
             case _:
                 raise ValueError(f"Unsupported dataset: {dataset_name}.")
 
 
         logger.info(f"DataManager initialized with dataset: {dataset_name}, batch size: {batch_size}, data fraction: {data_fraction}, model name: {model_name}, seed: {seed}.")
+        logger.info(f"Training set has {len(self.train_set) // self.batch_size} batches. Validation set has {len(self.val_set) // self.batch_size} batches.")

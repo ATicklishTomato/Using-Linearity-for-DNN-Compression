@@ -215,7 +215,7 @@ def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios:
     layer_names = list(set(linearity_scores.keys()).intersection(set(pruning_ratios.keys())))
     logger.info(f"Computing scatterplot for {len(layer_names)} layers out of total {len(linearity_scores) + len(pruning_ratios)} layers.")
     linearity_values = [linearity_scores[name] for name in layer_names]
-    pruning_values = [1 - pruning_ratios[name] for name in layer_names] # Invert ratios to show the fraction of pruned weights
+    pruning_values = [pruning_ratios[name] for name in layer_names] # Invert ratios to show the fraction of pruned weights
 
     plt.figure(figsize=(10, 6))
     plt.scatter(linearity_values, pruning_values)
@@ -224,8 +224,8 @@ def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios:
         plt.annotate(name, (linearity_values[i], pruning_values[i]))
 
     plt.xlabel('Linearity Compression Score')
-    plt.ylabel('Pruning Ratio')
-    plt.title('Linearity Compression Scores vs Pruning Scores')
+    plt.ylabel('Fraction of pruned weights')
+    plt.title('Linearity Compression Scores vs Pruning Ratios')
     plt.grid()
     plt.tight_layout()
     plt.savefig(f"{save_dir}/linearity_pruning_scatterplot.png")
@@ -253,7 +253,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         hidden_layer_reduction (int): The number of hidden layers to remove for distilled llama.
     """
     short_model = "llama" if "llama" in model else "resnet"
-    save_dir = "./results/rq2/" + relation_to + "/" + short_model + "/" + dataset + "/" + str(seed)
+    save_dir = "./results/rq2/" + linearity + "/" + relation_to + "/" + short_model + "/" + dataset + "/" + str(seed)
     os.makedirs(save_dir, exist_ok=True)
 
     # ------------------------------------------------------------
