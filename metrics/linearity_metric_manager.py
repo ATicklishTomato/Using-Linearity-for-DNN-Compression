@@ -2,6 +2,7 @@ import torch
 import logging
 from metrics.mean_preactivation import mean_preactivations
 from metrics.fraction import fraction_of_activation
+from metrics.procrustes import procrustes_based_linearity
 
 logger = logging.getLogger(__name__)
 
@@ -30,16 +31,14 @@ class LinearityMetric:
 
         match (model_name, metric_name):
             case (_, "mean_preactivation"):
-                self.metric_fn = lambda model: mean_preactivations(model, self.data_handler,
-                                                                         device=self.device, save=self.save, save_dir=self.save_dir)
-            case ("llama-2-7b" | "llama-2-13b" | "llama-3-1b" | "llama-3-3b", "procrustes"):
-                raise NotImplementedError("Procrustes metric not implemented for Llama yet.")
+                self.metric_fn = lambda model: mean_preactivations(model, self.data_handler, device=self.device,
+                                                                   save=self.save, save_dir=self.save_dir)
+            case (_, "procrustes"):
+                self.metric_fn = lambda model: procrustes_based_linearity(model, self.data_handler, device=self.device,
+                                                                          save=self.save, save_dir=self.save_dir)
             case (_, "fraction"):
-                self.metric_fn = lambda model: fraction_of_activation(model, self.data_handler,
-                                                                   device=self.device, save=self.save,
-                                                                   save_dir=self.save_dir)
-            case("resnet18" | "resnet34" | "resnet50", "procrustes"):
-                raise NotImplementedError("Procrustes metric not implemented for Resnet yet.")
+                self.metric_fn = lambda model: fraction_of_activation(model, self.data_handler, device=self.device,
+                                                                      save=self.save, save_dir=self.save_dir)
             case _:
                 raise ValueError(f"Unsupported model and metric combination: {model_name} and {metric_name}.")
 

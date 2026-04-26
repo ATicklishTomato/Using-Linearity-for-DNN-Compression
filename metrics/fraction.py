@@ -47,7 +47,7 @@ def fraction_of_activation(model, data_handler, device='cuda', save=False, save_
     """
     logger.info("Starting to compute fraction of activations.")
     is_resnet = isinstance(model, ResNet)
-    target_layer_pattern = re.compile(r"^model.layer\d+\.\d+\.conv2$") if is_resnet else re.compile(r"^model.layers.\d+.self_attn$")
+    target_layer_pattern = re.compile(r"^model\.layer\d+\.\d+\.conv2$") if is_resnet else re.compile(r"^model\.layers.\d+\.self_attn$")
     logger.info(f"target_layer_pattern: {target_layer_pattern}")
 
     model.eval().to(device)
