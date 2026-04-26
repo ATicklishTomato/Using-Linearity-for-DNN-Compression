@@ -86,35 +86,67 @@ def fold_linear_conv_sequences(
             f"{conv1.in_channels}→{conv1.out_channels}→{conv2.out_channels}"
         )
 
-        W1 = conv1.weight.data
-        W2 = conv2.weight.data
+        W1 = conv1.weight.detach()  # [C_mid, C_in, k1, k1]
+        W2 = conv2.weight.detach()  # [C_out, C_mid, k2, k2]
 
-        C_out, C_mid, k2, _ = W2.shape
-        _, C_in, k1, _ = W1.shape
+        C_mid, C_in, k1, _ = W1.shape
+        C_out, C_mid2, k2, _ = W2.shape
 
+        k_fold = k1 + k2 - 1
+
+        # ---------------------------------------------------------
+        # Flip W2 because conv2d does cross-correlation
+        # Need true kernel convolution for composition
+        # ---------------------------------------------------------
+        W2_flip = torch.flip(W2, dims=(-1, -2))
+
+        # ---------------------------------------------------------
+        # Vectorized kernel composition
+        #
+        # Treat each (out_channel, mid_channel) kernel in W2 as a
+        # conv filter applied to all matching W1[mid_channel, in_channel]
+        # ---------------------------------------------------------
         W_fold = torch.zeros(
-            (C_out, C_in, k1 + k2 - 1, k1 + k2 - 1),
+            (C_out, C_in, k_fold, k_fold),
             device=W1.device,
+            dtype=W1.dtype,
         )
 
-        for m in range(C_out):
-            for i in range(C_in):
-                acc = 0
-                for j in range(C_mid):
-                    acc = acc + F.conv2d(
-                        W1[j, i].unsqueeze(0).unsqueeze(0),
-                        W2[m, j].unsqueeze(0).unsqueeze(0),
-                    ).squeeze()
-                W_fold[m, i] = acc
+        # Process each intermediate channel j
+        for j in range(C_mid):
+            # Input kernels from conv1:
+            # [C_in, 1, k1, k1]
+            x = W1[j].unsqueeze(1)
 
+            # Filters from conv2:
+            # [C_out, 1, k2, k2]
+            w = W2_flip[:, j].unsqueeze(1)
+
+            # Apply all output filters to all input kernels
+            # output: [C_in, C_out, k_fold, k_fold]
+            out = F.conv2d(
+                x,
+                w,
+                padding=k2 - 1
+            )
+
+            # Rearrange to [C_out, C_in, k_fold, k_fold]
+            out = out.permute(1, 0, 2, 3)
+
+            W_fold += out
+
+        # ---------------------------------------------------------
+        # Build folded conv
+        # ---------------------------------------------------------
         new_conv = nn.Conv2d(
             in_channels=C_in,
             out_channels=C_out,
-            kernel_size=W_fold.shape[-1],
-            padding=W_fold.shape[-1] // 2,
+            kernel_size=k_fold,
+            padding=k_fold // 2,
             bias=False,
-        )
+        ).to(W1.device)
         new_conv.weight.data.copy_(W_fold)
+
         return new_conv
 
     # ------------------------------------------------------------

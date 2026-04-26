@@ -5,6 +5,7 @@ import logging
 from collections import defaultdict
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision.models import ResNet
 from tqdm import tqdm
@@ -17,32 +18,94 @@ debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 # Utility functions
 # ============================================================
 
-def flatten_representation(tensor):
+def flatten_representation(X, Y=None):
     """
-    Convert arbitrary activations to shape [N, D].
+    Prepare activations for linearity scoring.
 
-    Cases:
-        NLP:    [B, T, D] -> [B*T, D]
-        CNN:    [B, C, H, W] -> [B*H*W, C]
-        Vector: [B, D] -> [B, D]
+    If only X is provided:
+        returns flattened X
+
+    If X and Y are provided:
+        jointly aligns shapes first, then returns (X_flat, Y_flat)
+
+    Cases
+    -----
+    NLP:
+        [B,T,D] -> [B*T,D]
+
+    CNN same spatial size:
+        [B,C,H,W] -> [B*H*W,C]
+
+    CNN different spatial size:
+        adaptively pool X to Y spatial size, then flatten
+
+    Vector:
+        [B,D] -> [B,D]
     """
-    if tensor.dim() == 2:
-        return tensor
 
-    elif tensor.dim() == 3:
-        # [B,T,D]
-        b, t, d = tensor.shape
-        return tensor.reshape(b * t, d)
+    # --------------------------------------------------------
+    # Single tensor mode (backward compatible)
+    # --------------------------------------------------------
+    if Y is None:
+        if X.dim() == 2:
+            return X
 
-    elif tensor.dim() == 4:
-        # [B,C,H,W] -> [B,H,W,C]
-        b, c, h, w = tensor.shape
-        x = tensor.permute(0, 2, 3, 1).contiguous()
-        return x.reshape(b * h * w, c)
+        elif X.dim() == 3:
+            b, t, d = X.shape
+            return X.reshape(b * t, d)
 
-    else:
-        # fallback
-        return tensor.reshape(-1, tensor.shape[-1])
+        elif X.dim() == 4:
+            b, c, h, w = X.shape
+            X = X.permute(0, 2, 3, 1).contiguous()
+            return X.reshape(b * h * w, c)
+
+        else:
+            return X.reshape(-1, X.shape[-1])
+
+    # --------------------------------------------------------
+    # Joint mode (recommended for scoring)
+    # --------------------------------------------------------
+
+    # ---------- vectors ----------
+    if X.dim() == 2 and Y.dim() == 2:
+        return X, Y
+
+    # ---------- transformers ----------
+    if X.dim() == 3 and Y.dim() == 3:
+        bx, tx, dx = X.shape
+        by, ty, dy = Y.shape
+
+        n = min(tx, ty)
+        X = X[:, :n, :]
+        Y = Y[:, :n, :]
+
+        X = X.reshape(-1, dx)
+        Y = Y.reshape(-1, dy)
+
+        return X, Y
+
+    # ---------- CNNs ----------
+    if X.dim() == 4 and Y.dim() == 4:
+        _, _, hy, wy = Y.shape
+
+        # align spatial grid BEFORE flattening
+        if X.shape[-2:] != Y.shape[-2:]:
+            X = F.adaptive_avg_pool2d(X, (hy, wy))
+
+        bx, cx, hx, wx = X.shape
+        by, cy, hy, wy = Y.shape
+
+        X = X.permute(0, 2, 3, 1).contiguous().reshape(bx * hx * wx, cx)
+        Y = Y.permute(0, 2, 3, 1).contiguous().reshape(by * hy * wy, cy)
+
+        return X, Y
+
+    # ---------- fallback ----------
+    X = X.reshape(-1, X.shape[-1])
+    Y = Y.reshape(-1, Y.shape[-1])
+
+    n = min(X.shape[0], Y.shape[0])
+    return X[:n], Y[:n]
 
 
 def center_and_normalize(X, eps=1e-8):
@@ -63,6 +126,7 @@ def compute_linearity_score(X, Y):
     via least squares:
         A = pinv(X_tilde) @ Y_tilde
     """
+    X, Y = flatten_representation(X, Y)
     X = center_and_normalize(X)
     Y = center_and_normalize(Y)
 
@@ -76,6 +140,25 @@ def compute_linearity_score(X, Y):
     score = 1.0 - error.item()
     return score
 
+def expand_scores_to_individual_layers(scores, is_resnet):
+    """The scores we get are for blocks. The broader experimental code looks at individual layers.
+    This function adapts the labels to reference the individual layers.
+    Args:
+        scores: dict[block_name, score] The original scores for each block.
+        is_resnet: bool Indication whether the scores are for resnet
+    Returns:
+        dict[layer_name, score] New dict with scores for each layer in the block, copied from the block
+    """
+    new_scores = {}
+    for block_name, score in scores.items():
+        if is_resnet:
+            new_scores[block_name + ".conv1"] = score
+            new_scores[block_name + ".conv2"] = score
+        else:
+            new_scores[block_name + ".self_attn"] = score
+
+    return new_scores
+
 
 # ============================================================
 # Hook logic
@@ -86,7 +169,7 @@ def pre_hook_fn(module, inputs, storage, name):
     Save input to block.
     """
     x = inputs[0].detach()
-    storage[name]["x"].append(flatten_representation(x).cpu())
+    storage[name]["x"].append(x.cpu())
 
 
 def post_hook_fn(module, inputs, output, storage, name):
@@ -97,7 +180,7 @@ def post_hook_fn(module, inputs, output, storage, name):
         output = output[0]
 
     y = output.detach()
-    storage[name]["y"].append(flatten_representation(y).cpu())
+    storage[name]["y"].append(y.cpu())
 
 
 # ============================================================
@@ -131,7 +214,7 @@ def procrustes_based_linearity(
 
     if is_resnet:
         # Residual blocks
-        target_layer_pattern = re.compile(r"^model\.layer\d+\.\d+$")
+        target_layer_pattern = re.compile(r"^layer\d+\.\d+$")
     else:
         # Transformer blocks
         target_layer_pattern = re.compile(r"^model\.layers\.\d+$")
@@ -246,4 +329,4 @@ def procrustes_based_linearity(
         logger.info(f"Saved to {os.path.join(save_dir, 'procrustes_scores.json')}")
 
     logger.info("Finished block linearity computation.")
-    return scores
+    return expand_scores_to_individual_layers(scores, is_resnet)

@@ -50,7 +50,7 @@ def parse_args():
                         help='Number of epochs for training and fine-tuning.')
     parser.add_argument('--lr', type=float, default=5e-5,
                         help='Learning rate for optimizer.')
-    parser.add_argument('--data_fraction', type=float, default=0.05,
+    parser.add_argument('--data_fraction', type=float, default=0.1,
                         help='Fraction of data to use for training and evaluation.')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility.')
@@ -84,6 +84,7 @@ if __name__ == '__main__':
         'dataset': args.dataset,
         'experiment': args.experiment,
         'linearity': args.linearity,
+        'threshold': args.threshold,
         'relation': args.relation,
         'seed': args.seed,
         'batch_size': args.batch_size,
