@@ -50,8 +50,11 @@ def parse_args():
                         help='Number of epochs for training and fine-tuning.')
     parser.add_argument('--lr', type=float, default=5e-5,
                         help='Learning rate for optimizer.')
-    parser.add_argument('--data_fraction', type=float, default=0.1,
-                        help='Fraction of data to use for training and evaluation.')
+    parser.add_argument('--data_fraction', type=float, default=None,
+                        help='Fraction of data to use for training and evaluation. If None, default fractions are:'
+                             '- imagenet: 0.1'
+                             '- tinystories: 0.01'
+                             '- cifar10: 0.5')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility.')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
@@ -72,6 +75,16 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
+
+    if args.data_fraction is None:
+        if args.dataset == 'imagenet':
+            args.data_fraction = 0.1
+        elif args.dataset == 'tinystories':
+            args.data_fraction = 0.01
+        elif args.dataset == 'cifar10':
+            args.data_fraction = 0.5
+        else:
+            args.data_fraction = 1.0 # fallback
 
     logging.basicConfig(
         filename=f'run-{args.model}-{datetime.now().strftime("%Y%m%d-%H%M%S")}.log',
