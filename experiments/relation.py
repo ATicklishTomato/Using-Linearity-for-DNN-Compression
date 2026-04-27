@@ -24,7 +24,7 @@ def _get_target_layers(model):
     elif "llama" in model.__class__.__name__.lower():
         pattern = r"model\.layers\..*\.self_attn"
     else:
-        raise ValueError(...)
+        raise ValueError("Unsupported model type")
 
     layers = []
     names = []
@@ -37,74 +37,67 @@ def _get_target_layers(model):
     return layers, names
 
 
-def _collect_activations(model, x, layers):
-    activations = []
+def _process_output(output):
+    """
+    Convert layer outputs to [B, D]
+    """
+    if isinstance(output, tuple):
+        output = output[0]
 
-    def hook_fn(module, input, output):
-        # Flatten spatial dims but keep batch
-        if isinstance(output, tuple):
-            output = output[0]
+    if output.dim() == 4:
+        # CNN output [B,C,H,W] -> global avg pool -> [B,C]
+        output = output.mean(dim=(2, 3))
 
-        if output.dim() == 4:
-            # [B, C, H, W] → [B, C, H*W]
-            output = output.flatten(1)
+    elif output.dim() == 3:
+        # Transformer [B,S,H] -> token mean -> [B,H]
+        output = output.mean(dim=1)
 
-        if output.dim() == 3:
-            # [B, S, H] → [B, H]
-            output = output.mean(dim=1)
+    elif output.dim() == 2:
+        pass
 
-        elif output.dim() == 2:
-            # already [B, H]
-            pass
-
-        else:
-            raise ValueError(f"Unexpected shape: {output.shape}")
-
-        activations.append(output.detach())
-
-    hooks = []
-    for layer in layers:
-        hooks.append(layer.register_forward_hook(hook_fn))
-
-    if "resnet" in model.__class__.__name__.lower():
-        model.eval()
-        with torch.no_grad():
-            model(x)
     else:
-        model.eval()
-        with torch.no_grad():
-            with torch.autocast("cuda", dtype=torch.bfloat16):
+        raise ValueError(f"Unexpected shape {output.shape}")
+
+    return output.detach()
+
+
+def _collect_activations(model, x, layers, device):
+    acts = []
+
+    def hook_fn(module, inp, out):
+        acts.append(_process_output(out).to(device))
+
+    hooks = [layer.register_forward_hook(hook_fn) for layer in layers]
+
+    model.eval()
+    with torch.no_grad():
+        if isinstance(x, dict):
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 model(**x)
+        else:
+            model(x)
 
     for h in hooks:
         h.remove()
 
-    return activations
+    return acts
 
 
-def _center_gram(K):
-    """Center Gram matrix."""
-    row_mean = K.mean(dim=1, keepdim=True)
-    col_mean = K.mean(dim=0, keepdim=True)
-    total_mean = K.mean()
-    return K - row_mean - col_mean + total_mean
+def _linear_cka_fast(X, Y):
+    """
+    Memory-efficient linear CKA.
+    X: [N, Dx]
+    Y: [N, Dy]
+    """
+    X = X.float()
+    Y = Y.float()
 
-
-def _linear_cka(X, Y):
-    """Compute linear CKA between two activation matrices."""
-    # X, Y: (n_samples, features)
     X = X - X.mean(dim=0, keepdim=True)
     Y = Y - Y.mean(dim=0, keepdim=True)
 
-    K = X @ X.T
-    L = Y @ Y.T
-
-    Kc = _center_gram(K)
-    Lc = _center_gram(L)
-
-    hsic = (Kc * Lc).sum()
-    norm_x = torch.norm(Kc)
-    norm_y = torch.norm(Lc)
+    hsic = torch.norm(X.T @ Y, p="fro") ** 2
+    norm_x = torch.norm(X.T @ X, p="fro")
+    norm_y = torch.norm(Y.T @ Y, p="fro")
 
     return (hsic / (norm_x * norm_y + 1e-8)).item()
 
@@ -129,77 +122,89 @@ def cka_similarity_matrix(model_a, model_b, dataloader, device="cuda", tokenizer
     layers_b, names_b = _get_target_layers(model_b)
 
     m, n = len(layers_a), len(layers_b)
-    matrix = np.zeros((m, n))
 
-    # accumulate activations over batches
     acts_a_all = [[] for _ in range(m)]
     acts_b_all = [[] for _ in range(n)]
 
-    logger.info("Prepped for CKA computation, starting to collect activations and compute similarity matrix.")
-    for i, x in enumerate(dataloader):
-        if "resnet" in model_a.__class__.__name__.lower() or "resnet" in model_b.__class__.__name__.lower():
+    logger.info("Prepped for CKA computation, processing batches...")
+    for batch_idx, x in enumerate(dataloader):
+        if "resnet" in model_a.__class__.__name__.lower():
             x, _ = x
+            x = x.to(device)
+
         else:
-            x = tokenizer(x['text'], return_tensors='pt', padding=True, truncation=True)
+            x = tokenizer(
+                x["text"],
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+            )
+            x = {k: v.to(device) for k, v in x.items()}
 
-        x = x.to(device)
+        acts_a = _collect_activations(model_a, x, layers_a, device)
+        acts_b = _collect_activations(model_b, x, layers_b, device)
 
-        acts_a = _collect_activations(model_a, x, layers_a)
-        acts_b = _collect_activations(model_b, x, layers_b)
-
-        for j in range(m):
-            acts_a_all[j].append(acts_a[j].cpu())
+        for i in range(m):
+            acts_a_all[i].append(acts_a[i].cpu())
 
         for j in range(n):
             acts_b_all[j].append(acts_b[j].cpu())
 
-    logger.info("Activations collected for all batches, now concatenating and computing CKA matrix.")
+        del acts_a, acts_b
+        torch.cuda.empty_cache()
 
-    # concatenate across batches
-    acts_a_all = [torch.cat(a, dim=0) for a in acts_a_all]
-    acts_b_all = [torch.cat(b, dim=0) for b in acts_b_all]
+    logger.info("Batches processed. Calculating CKA similarity matrix...")
 
-    logger.info("Activations concatenated, now computing CKA similarity matrix.")
+    # concatenate layer activations
+    acts_a_all = [torch.cat(v, dim=0) for v in acts_a_all]
+    acts_b_all = [torch.cat(v, dim=0) for v in acts_b_all]
 
-    # compute CKA matrix
+    # -------- compute CKA --------
+    matrix = np.zeros((m, n), dtype=np.float32)
+
     for i in range(m):
-        for j in range(n):
-            matrix[i, j] = _linear_cka(acts_a_all[i], acts_b_all[j])
+        Xa = acts_a_all[i]
 
-    logger.info("CKA similarity matrix computed.")
+        for j in range(n):
+            Yb = acts_b_all[j]
+            matrix[i, j] = _linear_cka_fast(Xa, Yb)
+
+    logger.info("Calculated CKA similarity matrix.")
 
     return matrix, names_a, names_b
 
-def visualize_cka_similarity_matrix(matrix, save_dir, layer_names, linearity_scores):
+def visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, student_layer_names, linearity_scores):
     """Creates a magma heatmap of the cka similarity matrix using matplotlib.
     Shows row and column indexes to roughly identify layers. Similarity scores are listed in the cells.
     Stores the visualization in ./results with the given filename.
     Args:
         matrix: A numpy array of shape (m, n) containing the cka similarity values between the layers.
         save_dir: The directory to save the heatmap. Saved as "cka_similarity_heatmap.png" in the given directory.
-        layer_names: Names of the parent model layers.
+        teacher_layer_names: Names of the teacher layers.
+        student_layer_names: Names of the student layers.
         linearity_scores: A list of the linearity scores for each layer (length m).
     """
     logger.info(f"Visualizing CKA similarity matrix with shape {matrix.shape} and saving to {save_dir}/cka_similarity_heatmap.png")
     model_name = "llama" if "llama" in save_dir else "resnet"
 
     ticks = []
+    x_labels = student_layer_names
     y_labels = []
-    for i, name in enumerate(layer_names):
+    for i, name in enumerate(teacher_layer_names):
         if name in linearity_scores:
             score = linearity_scores[name]
             ticks.append(i)
-            y_labels.append(f"{name.split('.')[-1]} ({score:.4f})")
+            y_labels.append(f"{name} ({score:.4f})")
 
     plt.imshow(matrix, cmap='magma', vmin=0, vmax=1, origin='upper')
-    plt.colorbar(label=f'CKA Similarity of {model_name} layers')
+    plt.colorbar(label=f'CKA Similarity of {model_name} teacher and student layers')
     plt.xlabel('Student model')
-    plt.ylabel('Parent model')
+    plt.ylabel('Teacher model')
     # Move x-axis to top
     plt.gca().xaxis.tick_top()
     plt.gca().xaxis.set_label_position('top')
-    plt.xticks(rotation=90)
-    plt.yticks(ticks=ticks, labels=y_labels, rotation=45)
+    plt.xticks(ticks=range(len(x_labels)), labels=x_labels, rotation=90, fontsize=8)
+    plt.yticks(ticks=ticks, labels=y_labels, rotation=0, fontsize=8)
     plt.tight_layout()
     plt.savefig(f"{save_dir}/cka_similarity_heatmap.png")
     plt.close()
@@ -327,8 +332,10 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         logger.info("Saved linearity vs pruning scatterplot.")
     if student_model is not None:
         data_loader = DataLoader(data_handler.val_set, batch_size=batch_size, shuffle=False)
-        matrix, parent_layer_names, _ = cka_similarity_matrix(experimenter.model, student_model, data_loader, device=device, tokenizer=data_handler.tokenizer if "llama" in model else None)
-        visualize_cka_similarity_matrix(matrix, save_dir, parent_layer_names, linearity_scores)
+        matrix, teacher_layer_names, student_layer_names = cka_similarity_matrix(experimenter.model, student_model,
+                                                                                data_loader, device=device,
+                                                                                tokenizer=data_handler.tokenizer if "llama" in model else None)
+        visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, student_layer_names, linearity_scores)
         logger.info("Saved cka similarity heatmap.")
 
     # ------------------------------------------------------------
