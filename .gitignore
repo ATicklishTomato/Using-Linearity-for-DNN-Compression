@@ -183,6 +183,7 @@ cython_debug/
 **/compressed_llama2_7b
 wandb_logs
 results/*
+old_results
 !results/*.tar.gz
 !results/*.rar
 !results/*.zip

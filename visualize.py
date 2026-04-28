@@ -4,6 +4,28 @@ import numpy as np
 
 from experiments.relation import scatterplot_linearity_pruning_scores
 
+pretty_model_names = {
+    'resnet18': 'ResNet-18',
+    'resnet34': 'ResNet-34',
+    'resnet50': 'ResNet-50',
+    'llama-2-7b': 'Llama-2-7B',
+    'llama-2-13b': 'Llama-2-13B',
+    'llama-3-1b': 'Llama-3.2-1B',
+    'llama-3-3b': 'Llama-3.2-1B',
+}
+
+pretty_dataset_names = {
+    'imagenet': 'ImageNet',
+    'tinystories': 'TinyStories',
+    'cifar10': 'CIFAR-10',
+}
+
+pretty_linearity_names = {
+    'mean_preactivation': 'mean of preactivations',
+    'fraction': 'fraction of neuron activations',
+    'procrustes': 'Procrustes-based linearity score'
+}
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -15,11 +37,17 @@ def parse_args():
                         choices=['resnet18', 'resnet34', 'resnet50', 'llama-2-7b', 'llama-2-13b', 'llama-3-1b', 'llama-3-3b'],
                         default='resnet18',
                         help='Which model to aggregate results for')
-    parser.add_argument('--dataset', type=str, choices=['imagenet', 'tinystories'], default='imagenet',
+    parser.add_argument('--dataset', type=str, choices=['imagenet', 'tinystories', 'cifar10'], default='imagenet',
                         help='Which dataset to aggregate results for')
     parser.add_argument('--relation_to', type=str,
                         choices=['magnitude_pruning', 'basic_kd'], default='magnitude_pruning',
                         help='Which relation type to aggregate results for')
+    parser.add_argument('--linearity', type=str,
+                        choices=['mean_preactivation', 'procrustes', 'fraction'],
+                        default='mean_preactivation',
+                        help='Linearity metric to use. `mean_preactivation` refers to the mean of preactivations as defined by Pinson et al. (2024). ' +
+                             '`procrustes` refers to the Procrustes similarity-based metric as defined by Razzhigaev et al (2024). ' +
+                             '`fraction` refers to the fraction of neurons that is activated by an activation function.')
     return parser.parse_args()
 
 def mean_rq1_results(path):
@@ -29,14 +57,14 @@ def mean_rq1_results(path):
 
     metrics = ['accuracy_loss', 'param_compression_ratio', 'speedup', 'gflop_reduction']
     results = {metric: [] for metric in metrics}
-    files = glob.glob(path + '/**/*.json', recursive=True)
+    files = glob.glob(path + '/**/*results.json', recursive=True)
     for file in files:
         with open(file, 'r') as f:
             data = json.load(f)
             results['accuracy_loss'].append(data['accuracy_loss'])
             results['param_compression_ratio'].append(data['param_compression_ratio'])
             results['speedup'].append(data['speedup'])
-            if data['tflop_reduction'] is not None:
+            if 'tflop_reduction' in data.keys():
                 # Some data was labeled wrongly, this deals with that
                 results['gflop_reduction'].append(data['tflop_reduction'])
             else:
@@ -48,16 +76,37 @@ def mean_rq1_results(path):
 def generate_latex_results_table(mean_results, args, path):
     """This function takes a dictionary of mean results, and generates a latex table. Gets stored in the results directory"""
 
-    table = "\\begin{table}[H]\n"
-    table += "\\caption{Results for " + args.model + " averaged over 5 runs}\n"
-    table += "\\label{tab:" + args.model + "_results}\n"
-    table += "\\begin{center}\n"
-    table += "\\begin{tabular}{|c|c|c|c|c|c|c|}\n\\hline\n"
-    table += "\\textbf{Model} & \\textbf{Dataset} & \\textbf{Threshold} & \\textbf{Accuracy Loss$\\downarrow$} & \\textbf{Param Compression Ratio$\\uparrow$} & \\textbf{Speedup$\\uparrow$} & \\textbf{GFLOP Reduction$\\uparrow$} \\\\\n\\hline\n"
-    table += f"{args.model} & {args.dataset} & {args.threshold} & {mean_results['accuracy_loss']:.4f} & {mean_results['param_compression_ratio']:.4f} & {mean_results['speedup']:.4f} & {mean_results['gflop_reduction']} \\\\\n"
-    table += "\\end{tabular}\n"
-    table += "\\end{center}\n"
-    table += "\\end{table}\n"
+
+
+    caption = (
+        f"Results for {pretty_model_names[args.model]} trained on {pretty_dataset_names[args.dataset]} " +
+        f"with the {pretty_linearity_names[args.linearity]} metric averaged over 5 runs"
+    )
+
+    label = f"tab:{args.model}_{args.dataset}_{args.linearity}_results"
+
+    lines = []
+    lines.append("\\begin{table}[h]")
+    lines.append(f"\\caption{{{caption}}}")
+    lines.append(f"\\label{{{label}}}")
+    lines.append("\\begin{center}")
+    lines.append("\\resizebox{\\textwidth}{!}{")
+    lines.append("\\begin{tabular}{|c|c|c|c|c|c|}")
+    lines.append("\\hline")
+    lines.append(
+        "\\textbf{Compression method} & "
+        "\\textbf{Target} & "
+        "\\textbf{Accuracy Loss$\\downarrow$} & "
+        "\\textbf{Param Compression Ratio$\\downarrow$} & "
+        "\\textbf{Speedup$\\uparrow$} & "
+        "\\textbf{GFLOP Reduction$\\uparrow$} \\\\\\hline"
+    )
+    lines.append(f"Ours & {args.threshold} & {mean_results['accuracy_loss']*100:.4f}\\% & {mean_results['param_compression_ratio']:.4f} & {mean_results['speedup']:.4f} & {mean_results['gflop_reduction']:.4f} \\\\")
+    lines.append("\\end{tabular}}")
+    lines.append("\\end{center}")
+    lines.append("\\end{table}")
+
+    table = "\n".join(lines)
 
     with open(path + '/results.tex', 'w') as f:
         f.write(table)
@@ -154,11 +203,11 @@ if __name__ == '__main__':
     print(f"Aggregating results for RQ: {args.rq}, Threshold: {args.threshold}, Model: {args.model}, Dataset: {args.dataset}, Relation: {args.relation_to}")
     base_model_name = "resnet" if "resnet" in args.model else "llama"
     if args.rq == 'rq1':
-        path = f"./results/{args.rq}/{args.threshold}/{base_model_name}/{args.dataset}/"
+        path = f"./results/{args.rq}/{args.linearity}/{args.threshold}/{base_model_name}/{args.dataset}/"
     elif args.rq == 'rq2':
-        path = f"./results/{args.rq}/{args.relation_to}/{base_model_name}/{args.dataset}/"
+        path = f"./results/{args.rq}/{args.linearity}/{args.relation_to}/{base_model_name}/{args.dataset}/"
     elif args.rq == 'benchmark':
-        path = f"./results/rq2/{args.relation_to}/{base_model_name}/{args.dataset}/"
+        path = f"./results/rq2/{args.linearity}/{args.relation_to}/{base_model_name}/{args.dataset}/"
     else:
         raise ValueError("Invalid RQ choice. Must be one of 'rq1', 'rq2', or 'benchmark'.")
 

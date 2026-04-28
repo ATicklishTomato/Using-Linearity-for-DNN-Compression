@@ -242,7 +242,7 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
 
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
-                           epochs: int, lr: float, data_fraction: int, save: bool, seed: int, device: str, sweep: bool=False):
+                           epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str, sweep: bool=False):
     """Run the Llama compression experiment. Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
     Args:
         model (str): The ResNet architecture to use (e.g., 'llama-2-7b').
@@ -252,7 +252,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         batch_size (int): The batch size for training and evaluation.
         epochs (int): The number of epochs for fine-tuning.
         lr (float): The learning rate for the optimizer.
-        data_fraction (int): The fraction of the dataset to use for training and evaluation (e.g., 0.05 for 5%).
+        data_fraction (float): The fraction of the dataset to use for training and evaluation (e.g., 0.05 for 5%).
         save (bool): Whether to save the trained models and results.
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
