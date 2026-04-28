@@ -54,7 +54,7 @@ def parse_args():
                         help='Fraction of data to use for training and evaluation. If None, default fractions are:'
                              '- imagenet: 0.1'
                              '- tinystories: 0.01'
-                             '- cifar10: 0.5')
+                             '- cifar10: 1.0')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility.')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
@@ -82,7 +82,7 @@ if __name__ == '__main__':
         elif args.dataset == 'tinystories':
             args.data_fraction = 0.01
         elif args.dataset == 'cifar10':
-            args.data_fraction = 0.5
+            args.data_fraction = 1.0
         else:
             args.data_fraction = 1.0 # fallback
 

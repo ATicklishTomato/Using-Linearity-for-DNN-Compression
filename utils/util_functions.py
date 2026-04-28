@@ -47,6 +47,6 @@ def gflop_reduction(original_gflop, compressed_gflop):
     Returns:
         gflop_reduction:  GFLOP reduction
     """
-    if original_gflop == 0:
+    if compressed_gflop == 0:
         return 0.0
-    return (original_gflop - compressed_gflop) / original_gflop
+    return original_gflop / compressed_gflop

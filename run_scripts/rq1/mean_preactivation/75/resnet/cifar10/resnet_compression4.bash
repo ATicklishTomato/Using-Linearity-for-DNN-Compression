@@ -4,7 +4,7 @@
 #SBATCH --output=resnet_compression4_output_%j.txt
 #SBATCH --partition tue.gpu.q
 #SBATCH --gres=gpu:l4.22gb:1
-#SBATCH --time=08:00:00
+#SBATCH --time=04:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
@@ -21,4 +21,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m resnet18 -d cifar10 -e compression --max_batches 1024 --threshold "75%" --seed 1843 --save
+python main.py -m resnet18 -d cifar10 -e compression --max_batches 1024 --threshold "75%" --epochs 20 --seed 1843 --save

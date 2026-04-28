@@ -1,7 +1,7 @@
 import argparse
 
 import numpy as np
-
+import utils.util_functions as utils
 from experiments.relation import scatterplot_linearity_pruning_scores
 
 pretty_model_names = {
@@ -80,7 +80,7 @@ def generate_latex_results_table(mean_results, args, path):
 
     caption = (
         f"Results for {pretty_model_names[args.model]} trained on {pretty_dataset_names[args.dataset]} " +
-        f"with the {pretty_linearity_names[args.linearity]} metric averaged over 5 runs"
+        f"with the {pretty_linearity_names[args.linearity]} linearity metric averaged over 5 runs"
     )
 
     label = f"tab:{args.model}_{args.dataset}_{args.linearity}_results"
@@ -111,11 +111,11 @@ def generate_latex_results_table(mean_results, args, path):
     with open(path + '/results.tex', 'w') as f:
         f.write(table)
 
-def mean_benchmark_results(path, base_metrics_path="./results/rq1/75/resnet/imagenet/**/*.json"):
+def mean_benchmark_results(path, base_metrics_path="./results/rq1/mean_preactivation/75/resnet/imagenet/**/*results.json"):
     import json
     import glob
-    comp_metrics = ['comp_acc', 'comp_params', 'comp_infer']#, 'comp_gflops']
-    base_metrics = ['original_accuracy', 'original_param_count', 'original_inference_time']#, 'original_gflops']
+    comp_metrics = ['comp_acc', 'comp_params', 'comp_infer', 'comp_gflops']
+    base_metrics = ['original_accuracy', 'original_param_count', 'original_inference_time', 'original_gflops']
 
     # Get the base metrics from all json files in base metrics path and average them out
     base_metrics_files = glob.glob(base_metrics_path, recursive=True)
@@ -126,39 +126,38 @@ def mean_benchmark_results(path, base_metrics_path="./results/rq1/75/resnet/imag
             base_results['original_accuracy'].append(data['original_accuracy'])
             base_results['original_param_count'].append(data['original_param_count'])
             base_results['original_inference_time'].append(data['original_inference_time'])
-            # if data['original_gflops'] is not None:
-            #     # Some data was labeled wrongly, this deals with that
-            #     base_results['original_gflops'].append(data['original_gflops'])
-            # else:
-            #     base_results['original_gflops'].append(data['original_tflops'])
+            if 'original_tflops' in data.keys():
+                # Some data was labeled wrongly, this deals with that
+                base_results['original_gflops'].append(data['original_tflops'])
+            else:
+                base_results['original_gflops'].append(data['original_gflops'])
 
     base_results = {metric: sum(values)/len(values) for metric, values in base_results.items()}
 
     # Get the compression method results and average them out
     comp_metrics_files = glob.glob(path + "*.json")
     comp_results = {metric: [] for metric in comp_metrics}
-    print(comp_metrics_files)
     for file in comp_metrics_files:
         with open(file, 'r') as f:
             data = json.load(f)
             comp_results['comp_acc'] = data['comp_acc']
             comp_results['comp_params'] = data['comp_params']
             comp_results['comp_infer'] = data['comp_infer']
-            # comp_results['comp_gflops'] = data['comp_gflops']
+            comp_results['comp_gflops'] = data['comp_gflops']
 
     comp_results = {metric: sum(values)/len(values) for metric, values in comp_results.items()}
 
     # Compute accuracy_loss, param_compression_ratio, speedup, and gflop_reduction
-    accuracy_loss = base_results['original_accuracy'] - comp_results['comp_acc']
-    param_compression_ratio = base_results['original_param_count'] / comp_results['comp_params']
-    speedup = base_results['original_inference_time'] / comp_results['comp_infer']
-    # gflop_reduction = base_results['original_gflops'] / comp_results['comp_gflops']
+    accuracy_loss = utils.accuracy_loss(base_results['original_accuracy'], comp_results['comp_acc'])
+    param_compression_ratio = utils.compression_ratio(base_results['original_param_count'], comp_results['comp_params'])
+    speedup = utils.speedup(base_results['original_inference_time'], comp_results['comp_infer'])
+    gflop_reduction = utils.gflop_reduction(base_results['original_gflops'], comp_results['comp_gflops'])
 
     return {
         'accuracy_loss': accuracy_loss,
         'param_compression_ratio': param_compression_ratio,
         'speedup': speedup,
-        'gflop_reduction': "Unknown"#gflop_reduction,
+        'gflop_reduction': gflop_reduction,
     }
 
 
@@ -200,14 +199,16 @@ def avg_rq2_scores(path):
 
 if __name__ == '__main__':
     args = parse_args()
-    print(f"Aggregating results for RQ: {args.rq}, Threshold: {args.threshold}, Model: {args.model}, Dataset: {args.dataset}, Relation: {args.relation_to}")
+    print(f"Aggregating results for RQ: {args.rq}, Threshold: {args.threshold}, Model: {args.model}, Dataset: {args.dataset}, Relation: {args.relation_to}" +
+      f", Linearity: {args.linearity}")
     base_model_name = "resnet" if "resnet" in args.model else "llama"
     if args.rq == 'rq1':
         path = f"./results/{args.rq}/{args.linearity}/{args.threshold}/{base_model_name}/{args.dataset}/"
     elif args.rq == 'rq2':
         path = f"./results/{args.rq}/{args.linearity}/{args.relation_to}/{base_model_name}/{args.dataset}/"
     elif args.rq == 'benchmark':
-        path = f"./results/rq2/{args.linearity}/{args.relation_to}/{base_model_name}/{args.dataset}/"
+        path = f"./old_results/rq2/{args.relation_to}/{base_model_name}/{args.dataset}/"
+        # path = f"./results/rq2/{args.linearity}/{args.relation_to}/{base_model_name}/{args.dataset}/"
     else:
         raise ValueError("Invalid RQ choice. Must be one of 'rq1', 'rq2', or 'benchmark'.")
 
@@ -228,7 +229,8 @@ if __name__ == '__main__':
             else:
                 raise NotImplementedError
         case 'benchmark':
-            mean_bench = mean_benchmark_results(path)
+            base_performance_path = f"./results/rq1/{args.linearity}/{args.threshold}/{base_model_name}/{args.dataset}/**/*results.json"
+            mean_bench = mean_benchmark_results(path, base_metrics_path=base_performance_path)
             print("Benchmark results:", mean_bench)
             generate_latex_results_table(mean_bench, args, path)
 
