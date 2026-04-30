@@ -7,7 +7,6 @@ import numpy as np
 import torch
 import wandb
 import matplotlib
-from torch import nn
 
 matplotlib.use("Agg") # Avoid errors when running without UI
 from matplotlib import pyplot as plt
@@ -17,6 +16,7 @@ from metrics.linearity_metric_manager import LinearityMetric
 from utils.data_manager import DataManager
 from utils.llama_model import LlamaExperimenter
 from utils.resnet_model import ResNetExperimenter
+import utils.util_functions as utils
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ def _collect_activations(model, x, layers, device):
     def hook_fn(module, inp, out):
 
         # If there is an attention mask in input, we pass it to processing function
-        attention_mask = x.get("attention_mask", None)
+        attention_mask = x["attention_mask"] if isinstance(x, dict) and "attention_mask" in x else None
         if "llama" in model.__class__.__name__.lower() and attention_mask is None:
             logger.warning("Failed to grab attention mask")
 
@@ -201,7 +201,7 @@ def visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, stude
     model_name = "llama" if "llama" in save_dir else "resnet"
 
     ticks = []
-    x_labels = student_layer_names
+    x_labels = [name for name in student_layer_names if model_name == "resnet" or name.endswith('self_attn')]
     y_labels = []
     for i, name in enumerate(teacher_layer_names):
         if name in linearity_scores:
@@ -318,6 +318,13 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     # We recombine the linear and nonlinear splits as we don't care
     linearity_scores = {**linear_layers, **nonlinear_layers}
 
+    # ------------------------------------------------------------
+    # Evaluate initial model performance
+    # ------------------------------------------------------------
+    original_accuracy, original_param_count, original_inference_time, original_gflops = experimenter.validate_model()
+    logger.info(f"Original model accuracy: {original_accuracy:.4f}, parameters: {original_param_count}, "
+                f"inference time: {original_inference_time:.4f} seconds, gflops: {original_gflops}")
+
     # --------------------------------------------------------------
     # Compute pruning ratios or student model
     # --------------------------------------------------------------
@@ -325,16 +332,26 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     match relation_to:
         case 'magnitude_pruning':
             from compression_methods.magnitude_pruning import prune
-            prune_dict, acc, param, infer, gflops = prune(experimenter, data_handler, device=device,
+            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(experimenter, data_handler, device=device,
                                                                           pruning_ratio=pruning_ratio, lr=lr,
                                                           batch_size=batch_size, epochs=epochs)
         case 'basic_kd':
             from compression_methods.basic_kd import distill
             if blocks is None:
                 blocks = [1,1,2,2]
-            student_model, acc, param, infer, gflops = distill(experimenter, data_handler,device=device,
+            student_model, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = distill(experimenter, data_handler,device=device,
                                                                                    lr=lr, epochs=epochs, blocks=blocks,
                                                                                    hidden_layer_reduction=hidden_layer_reduction)
+
+    # ------------------------------------------------------------
+    # Evaluate compressed model performance
+    # ------------------------------------------------------------
+    accuracy_loss = utils.accuracy_loss(original_accuracy, compressed_accuracy)
+    param_compression_ratio = utils.compression_ratio(original_param_count, compressed_param_count)
+    speedup = utils.speedup(original_inference_time, compressed_inference_time)
+    gflop_reduction = utils.gflop_reduction(original_gflops, compressed_gflops)
+    logger.info(f"Accuracy loss: {accuracy_loss:.4f}, Parameter compression ratio: {param_compression_ratio:.4f}, "
+                f"Speedup: {speedup:.4f}x, GFLOP reduction: {gflop_reduction:.4f}")
 
     # --------------------------------------------------------------
     # Generate either scatterplot or similarity matrix
@@ -354,12 +371,36 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     # ------------------------------------------------------------
     # Log results to wandb and save models/results if enabled
     # ------------------------------------------------------------
+    wandb_logging_data = {
+        "model": model,
+        "dataset": dataset,
+        "relation_to": relation_to,
+        "linearity": linearity,
+        "seed": seed,
+        "linearity_scores": linearity_scores,
+        "comp_accuracy": compressed_accuracy,
+        "comp_param_count": compressed_param_count,
+        "comp_inference_time": compressed_inference_time,
+        "comp_gflops": compressed_gflops,
+        "original_accuracy": original_accuracy,
+        "original_param_count": original_param_count,
+        "original_inference_time": original_inference_time,
+        "original_gflops": original_gflops,
+        "accuracy_loss": accuracy_loss,
+        "param_compression_ratio": param_compression_ratio,
+        "speedup": speedup,
+        "gflop_reduction": gflop_reduction,
+    }
+
     if save:
         import json
 
         # Save linearity scores
         json.dump(linearity_scores, open(f"{save_dir}/linearity_scores.json", "w"), indent=4)
         logger.info(f"Saved linearity scores to {save_dir}/linearity_scores.json")
+
+        json.dump(wandb_logging_data, open(f"{save_dir}/wandb_logging_data.json", "w"), indent=4)
+        logger.info(f"Saved wandb logging data to {save_dir}/wandb_logging_data.json")
 
         if prune_dict is not None:
             json.dump(prune_dict, open(f"{save_dir}/prune_dict.json", "w"), indent=4)
@@ -375,19 +416,6 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
             # Store cka matrix
             np.save(f"{save_dir}/cka_similarity_matrix.npy", matrix)
             logger.info(f"Saved CKA similarity matrix to {save_dir}/cka_similarity_matrix.npy")
-
-    wandb_logging_data = {
-        "model": model,
-        "dataset": dataset,
-        "relation_to": relation_to,
-        "linearity": linearity,
-        "seed": seed,
-        "linearity_scores": linearity_scores,
-        "comp_acc": acc,
-        "comp_param": param,
-        "comp_infer": infer,
-        "comp_gflops": gflops,
-    }
 
     if prune_dict is not None:
         wandb_logging_data["prune_dict"] = prune_dict

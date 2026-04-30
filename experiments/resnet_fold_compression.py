@@ -266,7 +266,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     original_accuracy, original_param_count, original_inference_time, original_gflops = experimenter.validate_model()
     logger.info(f"Original model accuracy: {original_accuracy:.4f}, parameters: {original_param_count}, "
-                f"inference time: {original_inference_time:.4f} seconds, tflops: {original_gflops}")
+                f"inference time: {original_inference_time:.4f} seconds, gflops: {original_gflops}")
 
     # ------------------------------------------------------------
     # Compute linearity scores
@@ -292,14 +292,14 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = experimenter.validate_model()
     logger.info(f"Folded model accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, "
-                f"inference time: {compressed_inference_time:.4f} seconds, tflops: {compressed_gflops}")
+                f"inference time: {compressed_inference_time:.4f} seconds, gflops: {compressed_gflops}")
 
     accuracy_loss = utils.accuracy_loss(original_accuracy, compressed_accuracy)
     param_compression_ratio = utils.compression_ratio(original_param_count, compressed_param_count)
     speedup = utils.speedup(original_inference_time, compressed_inference_time)
     gflop_reduction = utils.gflop_reduction(original_gflops, compressed_gflops)
     logger.info(f"Accuracy loss: {accuracy_loss:.4f}, Parameter compression ratio: {param_compression_ratio:.4f}, "
-                f"Speedup: {speedup:.4f}x, TFLOP reduction: {gflop_reduction:.4f}")
+                f"Speedup: {speedup:.4f}x, GFLOP reduction: {gflop_reduction:.4f}")
 
     # ------------------------------------------------------------
     # Log results to wandb and save models/results if enabled

@@ -118,6 +118,6 @@ class ResNetExperimenter:
         with torch.no_grad():
             example_input = next(iter(data_loader))
             macs, _ = count_ops_and_params(model, example_input[0].to(self.device))
-        gflops =  2 * (macs / inference_time) / 1e9  # Convert to GFLOPs
+        gflops = 2 * macs / 1e9  # Convert to GFLOPs
 
         return accuracy, param_count, inference_time, gflops

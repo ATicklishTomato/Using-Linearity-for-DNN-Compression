@@ -141,6 +141,6 @@ class LlamaExperimenter:
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 macs, _ = count_ops_and_params(model, inputs)
-        gflops = 2 * (macs / inference_time) / 1e9  # Convert to GFLOPs
+        gflops = 2 * macs / 1e9  # Convert to GFLOPs
 
         return accuracy, param_count, avg_inference_time, gflops

@@ -141,7 +141,7 @@ def evaluate_student_resnet(student_model, data_handler, device='cuda'):
     with torch.no_grad():
         example_input = next(iter(data_loader))
         macs, _ = count_ops_and_params(model, example_input[0].to(device))
-    gflops = 2 * (macs / inference_time) / 1e9  # Convert to GFLOPs
+    gflops = 2 * macs / 1e9  # Convert to GFLOPs
 
     return accuracy, param_count, inference_time, gflops
 
@@ -299,7 +299,7 @@ def evaluate_student_llama(student_model, data_handler, device='cuda', top_k=5):
         inputs = (encoded["input_ids"], encoded["attention_mask"])
         with torch.autocast("cuda", dtype=torch.bfloat16):
             macs, _ = count_ops_and_params(model, inputs)
-    gflops = 2 * (macs / inference_time) / 1e9  # Convert to GFLOPs
+    gflops = 2 * macs / 1e9  # Convert to GFLOPs
 
     return accuracy, param_count, avg_inference_time, gflops
 
