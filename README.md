@@ -8,10 +8,14 @@ It will eventually contain all experiments and related artifacts.
 - `main.py` \- project entry / orchestration script (see file for CLI usage)
 - `sweep.py` \- script for running hyperparameter sweeps using Weights & Biases
 - `visualize.py` \- script for summarizing and visualizing results from experiments
-- `requirements.txt` \- Python dependencies
-- `experiments/` \- standalone experiment scripts
+- `experiments/` \- general experiment code, which run the experiments and log results
+- `compression_methods/` \- code for the different existing compression methods used for comparison and experiments
+- `data/` \- directory where datasets are stored or downloaded to
+- `metrics/` \- code for the different linearity metrics used in the experiments
+- `utils/` \- utility functions for loading datasets, models, finetuning and evaluation, and evaluation metric computation
 - `notebook_experiments/` \- Jupyter notebooks with initial exploratory experiments
-- `run_scripts/` \- example run scripts for cluster execution
+- `run_scripts/` \- run scripts for Slurm-based execution
+- `requirements.txt` \- Python dependencies
 
 ## Requirements
 Use a virtual environment or conda environment to avoid conflicts with other projects. Python 3.11 is recommended.
