@@ -7,6 +7,8 @@ import numpy as np
 import torch
 import wandb
 import matplotlib
+from torch import nn
+
 matplotlib.use("Agg") # Avoid errors when running without UI
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
@@ -37,7 +39,7 @@ def _get_target_layers(model):
     return layers, names
 
 
-def _process_output(output):
+def _process_output(output, attention_mask=None):
     """
     Convert layer outputs to [B, D]
     """
@@ -50,7 +52,12 @@ def _process_output(output):
 
     elif output.dim() == 3:
         # Transformer [B,S,H] -> token mean -> [B,H]
-        output = output.mean(dim=1)
+        # We want to avoid including padding in computation if possible
+        if attention_mask is not None:
+            attention_mask = attention_mask.unsqueeze(-1).to(output.dtype)  # [B, S, 1]
+            output = (output * attention_mask).sum(dim=1) / attention_mask.sum(dim=1).clamp(min=1)
+        else:
+            output = output.mean(dim=1)
 
     elif output.dim() == 2:
         pass
@@ -65,7 +72,13 @@ def _collect_activations(model, x, layers, device):
     acts = []
 
     def hook_fn(module, inp, out):
-        acts.append(_process_output(out).to(device))
+
+        # If there is an attention mask in input, we pass it to processing function
+        attention_mask = x.get("attention_mask", None)
+        if "llama" in model.__class__.__name__.lower() and attention_mask is None:
+            logger.warning("Failed to grab attention mask")
+
+        acts.append(_process_output(out, attention_mask).to(device))
 
     hooks = [layer.register_forward_hook(hook_fn) for layer in layers]
 
