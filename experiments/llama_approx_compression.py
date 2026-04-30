@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import numpy as np
 import torch
 import wandb
@@ -128,6 +130,42 @@ def get_attention_block_output(model, layer_ids, hidden_states, attention_mask):
     return hidden_states
 
 
+def get_block_input_output(model, model_inputs, layer_group, device="cuda") -> Tuple[torch.Tensor, torch.Tensor]:
+    """Gets the input and output of the specified attention block layers for training the linear approximation.
+    Args:
+        model: The LLaMA model to modify.
+        model_inputs: The model inputs to pass through the model
+        layer_group: A list of layer indices that form a contiguous block to replace.
+        device: The device to use.
+    Returns:
+        group_input: The embedding that gets passed into the block
+        group_output: The embedding that gets passed out of the block
+    """
+
+    group_input = torch.empty(0) # Placeholder to ensure variable is defined in scope for hook
+    group_output = torch.empty(0)
+
+    def input_hook(module, input, output):
+        nonlocal group_input
+        group_input = input[0].detach()
+
+    def output_hook(module, input, output):
+        nonlocal group_output
+        group_output = output[0].detach()
+
+    hooks = [model.model.layers[layer_group[0]].register_forward_hook(input_hook),
+             model.model.layers[layer_group[-1]].register_forward_hook(output_hook)]
+
+    with torch.no_grad():
+        with torch.amp.autocast(device):
+            model(**model_inputs)
+
+    for hook in hooks:
+        hook.remove()
+
+    return group_input, group_output
+
+
 def train_block_approximation(
     model,
     tokenizer,
@@ -161,7 +199,7 @@ def train_block_approximation(
     approx.train().to(device)
 
     for epoch in range(epochs):
-        for i, batch in tqdm(enumerate(train_dataset), total=len(train_dataset), desc=f"Training block {layer_group} Epoch {epoch}", leave=False, disable=debug_mode):
+        for i, batch in tqdm(enumerate(train_dataset), total=len(train_dataset), desc=f"Training block {layer_group} Epoch {epoch+1}", leave=False, disable=debug_mode):
 
             inputs = tokenizer(
                 batch["text"],
@@ -172,20 +210,13 @@ def train_block_approximation(
             ).to(device)
 
 
-            with torch.amp.autocast(device):
-                with torch.no_grad():
-                    x = model.model.embed_tokens(inputs.input_ids)
-                    y_teacher = get_attention_block_output(
-                        model,
-                        layer_group,
-                        x,
-                        inputs.attention_mask
-                    )
+            x, y_teacher = get_block_input_output(model, inputs, layer_group, device=device)
 
+            with torch.amp.autocast(device):
                 y_student = approx(x)
                 logger.debug(f"y_student shape: {y_student.shape}, y_teacher shape: {y_teacher.shape}")
                 logger.debug(f"y_student NaN: {torch.any(torch.isnan(y_student))}, y_teacher NaN: {torch.any(torch.isnan(y_teacher))}")
-                loss = loss_fn(y_student, y_teacher)
+                loss = loss_fn(y_student, y_teacher.unsqueeze(0))
 
             optimizer.zero_grad()
 
@@ -218,27 +249,24 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
     """
     if save_path is None:
         save_path = "./results"
-    if not os.path.exists(f"{save_path}/compressed_{experimenter.model_name}"):
-        for layer_group in groups:
-            logger.info(f"Training approximation for layer group: {layer_group}")
-            linear_block = train_block_approximation(
-                experimenter.model,
-                data_handler.tokenizer,
-                layer_group,
-                data_handler.train_set,
-                device,
-                epochs=epochs,
-                lr=lr
-            )
-            replace_attention_block(experimenter.model, layer_group, linear_block)
 
-        if save_model:
-            # Save the compressed model
-            experimenter.model.save_pretrained(f"{save_path}/compressed_{experimenter.model_name}")
-            logger.info(f"Compressed model saved to {save_path}/compressed_{experimenter.model_name}")
-    else:
-        experimenter.model = LlamaForCausalLM.from_pretrained(f"{save_path}/compressed_{experimenter.model_name}").to(device)
-        logger.info(f"Compressed model loaded from {save_path}/compressed_{experimenter.model_name}")
+    for layer_group in groups:
+        logger.info(f"Training approximation for layer group: {layer_group}")
+        linear_block = train_block_approximation(
+            experimenter.model,
+            data_handler.tokenizer,
+            layer_group,
+            data_handler.train_set,
+            device,
+            epochs=epochs,
+            lr=lr
+        )
+        replace_attention_block(experimenter.model, layer_group, linear_block)
+
+    if save_model:
+        # Save the compressed model
+        experimenter.model.save_pretrained(f"{save_path}/compressed_{experimenter.model_name}")
+        logger.info(f"Compressed model saved to {save_path}/compressed_{experimenter.model_name}")
 
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
