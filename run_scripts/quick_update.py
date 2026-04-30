@@ -1,8 +1,8 @@
 
 
-path = "./*/*/*/resnet50/*/*.bash"
-target = "resnet18"
-replace = "resnet50"
+path = "./*/*/*/llama*/superglue/*.bash"
+target = "tinystories"
+replace = "superglue"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path

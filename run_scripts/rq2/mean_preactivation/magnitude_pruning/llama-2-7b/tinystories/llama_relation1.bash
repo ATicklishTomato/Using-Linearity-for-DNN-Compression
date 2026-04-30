@@ -22,4 +22,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m llama-2-7b -d tinystories -e relation --relation magnitude_pruning --batch_size 4 --seed 42 --save
+python main.py -m llama-2-7b -d tinystories -e relation --relation magnitude_pruning --seed 42 --save
