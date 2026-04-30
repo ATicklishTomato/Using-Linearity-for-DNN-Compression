@@ -35,6 +35,10 @@ Place your credentials in the root files:
 
 Below the different ways of running experiments are described.
 
+### TU/e HPC and Snellius
+Run scripts are stored in `run_scripts/` and can be used for running experiments on HPC clusters using Slurm. 
+There is a script for every experiment run for the paper. Please keep in mind that the ResNet scripts are meant for running on the TU/e HPC, while the LLaMA scripts are meant for running on Snellius, due to the VRAM requirements of the models. Adjust the scripts as needed for your specific use case and cluster setup.
+
 ### Jupyter notebooks
 
 The Jupyter notebooks present only encompass early experimentation and are left to toy around with or provide introductory information.

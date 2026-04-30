@@ -1,0 +1,24 @@
+#!/bin/bash
+
+#SBATCH --job-name=resnet_relation_bkd4
+#SBATCH --output=resnet_relation_bkd4_output_%j.txt
+#SBATCH --partition tue.gpu.q
+#SBATCH --gres=gpu:l4.22gb:1
+#SBATCH --time=04:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=16G
+
+# Only load python because PyTorch module is garbage on this cluster
+module purge
+module load Python/3.12.3-GCCcore-13.3.0
+
+python -m venv .venv
+source .venv/bin/activate # Activate virtual environment
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Execute the script or command
+python main.py -m resnet50 -d cifar10 -e relation -l procrustes --relation basic_kd --epochs 20 --seed 1843 --save

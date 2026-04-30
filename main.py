@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def parse_args():
     parser = ArgumentParser(description='Execute experiments on inherent linearity in ResNets and Llamas.')
     parser.add_argument('-m', '--model', type=str,
-                        choices=['resnet18', 'resnet34', 'resnet50', 'llama-2-7b', 'llama-2-13b', 'llama-3-1b', 'llama-3-3b'],
+                        choices=['resnet18', 'resnet34', 'resnet50', 'llama-2-7b', 'llama-3-1b', 'llama-3-3b'],
                         default='resnet18',
                         help='Model architecture to use for the experiment.')
     parser.add_argument('-l', '--linearity', type=str,
