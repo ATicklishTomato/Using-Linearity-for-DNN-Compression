@@ -54,6 +54,16 @@ class DataManager:
             case "cifar10":
                 from utils.cifar10 import load_datasets
                 self.train_set, self.val_set = load_datasets(data_fraction, seed)
+            case "superglue":
+                if model_name is None:
+                    raise ValueError("Model name must be provided for text datasets to initialize the tokenizer.")
+
+                self.tokenizer = LlamaTokenizer.from_pretrained(model_name)  # Preload tokenizer for text datasets
+                self.tokenizer.pad_token = self.tokenizer.eos_token  # Set pad token to eos token if not already set to prevent errors
+                logger.info(f"Tokenizer initialized with pretrained model: {model_name}")
+
+                from utils.superglue import load_datasets
+                self.train_set, self.val_set = load_datasets(self.tokenizer, self.batch_size, reduction_fraction=data_fraction, seed=seed)
             case _:
                 raise ValueError(f"Unsupported dataset: {dataset_name}.")
 
