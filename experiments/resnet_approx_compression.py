@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import logging
 import wandb
+from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -47,15 +48,64 @@ def group_contiguous_layers(linear_layers, all_layers):
     logger.debug(f"Grouped contiguous layers: {groups}")
     return groups
 
-class LinearConvolutionalBlock(torch.nn.Module):
-    """A simple Linear Convolutional Block that can be trained to mimic parts of a model that behave largely linearly"""
-    def __init__(self, hidden_size_in, hidden_size_out):
+class LinearConvolutionalBlock(nn.Module):
+    def __init__(self, in_shape, out_shape, kernel_size=3):
+        """
+        in_shape:  (C_in, H_in, W_in)
+        out_shape: (C_out, H_out, W_out)
+        """
         super().__init__()
-        logger.debug(f"Initializing Linear Convolutional Block with input size {hidden_size_in} and output size {hidden_size_out}")
-        self.linear = torch.nn.Linear(hidden_size_in, hidden_size_out, dtype=torch.float32) # Initialize as fp32 first
 
-    def forward(self, hidden_states, **kwargs):
-        return self.linear(hidden_states)
+        _, self.C_in, self.H_in, self.W_in = in_shape
+        _, self.C_out, self.H_out, self.W_out = out_shape
+        self.kernel_size = kernel_size
+
+        # Infer stride from spatial sizes
+        assert self.H_in % self.H_out == 0
+        assert self.W_in % self.W_out == 0
+
+        self.stride_h = self.H_in // self.H_out
+        self.stride_w = self.W_in // self.W_out
+
+        # Unfold extracts sliding patches
+        self.unfold = nn.Unfold(
+            kernel_size=kernel_size,
+            stride=(self.stride_h, self.stride_w),
+            padding=kernel_size // 2
+        )
+
+        # Each patch is flattened to C_in * k * k
+        self.in_features = self.C_in * kernel_size * kernel_size
+        self.out_features = self.C_out
+
+        # Linear mapping per spatial location
+        self.linear = nn.Linear(self.in_features, self.out_features)
+
+    def forward(self, x):
+        """
+        x: (B, C_in, H_in, W_in)
+        returns: (B, C_out, H_out, W_out)
+        """
+        B = x.shape[0]
+
+        # Extract patches
+        patches = self.unfold(x)
+        # (B, C_in * k*k, L) where L = H_out * W_out
+
+        patches = patches.transpose(1, 2)
+        # (B, L, C_in * k*k)
+
+        # Apply linear mapping
+        out = self.linear(patches)
+        # (B, L, C_out)
+
+        # Reshape to image grid
+        out = out.transpose(1, 2)
+        # (B, C_out, L)
+
+        out = out.view(B, self.C_out, self.H_out, self.W_out)
+
+        return out
 
 class IdentityBlock(torch.nn.Module):
     """We need a separate IdentityBlock class to ensure we can handle additional arguments from forward pass"""
@@ -106,7 +156,7 @@ def get_block_input_output(model, model_input, layer_group, device="cuda") -> Tu
 
     def output_hook(module, input, output):
         nonlocal group_output
-        group_output = output[0].detach()
+        group_output = output.detach()
 
     hooks = [model.get_submodule(layer_group[0]).register_forward_hook(input_hook),
              model.get_submodule(layer_group[-1]).register_forward_hook(output_hook)]
@@ -141,21 +191,24 @@ def train_block_approximation(
     Returns:
         The linear approximation layer trained to mimic the specified attention block layers.
     """
-    # Get input size of first layer in group and output of last layer in group
-    hidden_size_in = model.get_submodule(layer_group[0]).in_channels * model.get_submodule(layer_group[0]).kernel_size[0] * model.get_submodule(layer_group[0]).kernel_size[1]
-    hidden_size_out = model.get_submodule(layer_group[-1]).out_channels * model.get_submodule(layer_group[-1]).kernel_size[0] * model.get_submodule(layer_group[-1]).kernel_size[1]
-    logger.debug(f"Training block approximation for layer group {layer_group} with input size {hidden_size_in} and output size {hidden_size_out}")
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    model.eval().to(device)
 
-    approx = LinearConvolutionalBlock(hidden_size_in, hidden_size_out).to(device)
+    # Get input size of first layer in group and output of last layer in group
+    single_data_point = next(iter(train_loader))[0].to(device) # Get a single data point to determine input and output sizes for the linear block
+    x, y_teacher = get_block_input_output(model, single_data_point, layer_group, device=device)
+    in_shape = x.shape
+    out_shape = y_teacher.shape
+    logger.debug(f"Training block approximation for layer group {layer_group} with input size {in_shape} and output size {out_shape}")
+
+    approx = LinearConvolutionalBlock(in_shape, out_shape).to(device)
+    approx.train().to(device)
 
     optimizer = torch.optim.AdamW(approx.parameters(), lr=lr)
     loss_fn = torch.nn.MSELoss()
     scaler = torch.amp.GradScaler(device)
 
-    model.eval().to(device)
-    approx.train().to(device)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     for epoch in range(epochs):
         for i, data in tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training block {layer_group} Epoch {epoch+1}", leave=False, disable=debug_mode):
 
@@ -167,7 +220,7 @@ def train_block_approximation(
             y_student = approx(x)
             logger.debug(f"y_student shape: {y_student.shape}, y_teacher shape: {y_teacher.shape}")
             logger.debug(f"y_student NaN: {torch.any(torch.isnan(y_student))}, y_teacher NaN: {torch.any(torch.isnan(y_teacher))}")
-            loss = loss_fn(y_student, y_teacher.unsqueeze(0))
+            loss = loss_fn(y_student, y_teacher)
 
             optimizer.zero_grad()
 
@@ -176,30 +229,21 @@ def train_block_approximation(
             scaler.update()
 
         logger.info(f"Block {layer_group} | Epoch {epoch} | Loss {loss.item():.6f}")
-
-    if model.config.dtype == torch.float16:
-        logger.debug("Reducing dtype to float16 to match model")
-        approx = approx.half()
     return approx
 
-def train_approximation_layers(experimenter, data_handler, groups, save_model: bool,
-                               epochs: int, lr: float, batch_size:int, device: str, save_path: str = None):
+def train_approximation_layers(experimenter, data_handler, groups,
+                               epochs: int, lr: float, batch_size:int, device: str):
     """Train linear approximations for specified layer groups in the model.
     Args:
         experimenter: The ResNetExperimenter instance containing the model to be compressed and its tokenizer.
         data_handler: The DataHandler instance containing the dataset
         groups: List of layer groups to approximate.
-        save_model (bool): Whether to save the compressed model to disk.
         epochs (int): Number of epochs to train.
         lr (float): Learning rate for training.
         device (str): The device to run the training on (e.g., 'cuda' or 'cpu').
-        save_path (str): Path to save the compressed model to disk.
     Returns:
         The compressed model with linear approximations.
     """
-    if save_path is None:
-        save_path = "./results"
-
     for layer_group in groups:
         logger.info(f"Training approximation for layer group: {layer_group}")
         linear_block = train_block_approximation(
@@ -212,11 +256,6 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
             batch_size=batch_size
         )
         replace_attention_block(experimenter.model, layer_group, linear_block)
-
-    if save_model:
-        # Save the compressed model
-        experimenter.model.save_pretrained(f"{save_path}/compressed_{experimenter.model_name}")
-        logger.info(f"Compressed model saved to {save_path}/compressed_{experimenter.model_name}")
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
                            epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str, sweep: bool=False):
@@ -274,8 +313,8 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     all_layers = list(linear_layers.keys()) + list(nonlinear_layers.keys())
     groups = group_contiguous_layers(linear_layers, all_layers)
-    train_approximation_layers(experimenter, data_handler, groups, save_model=save,
-                               epochs=epochs, lr=lr, batch_size=batch_size, device=device, save_path=save_dir)
+    train_approximation_layers(experimenter, data_handler, groups, epochs=epochs, lr=lr,
+                               batch_size=batch_size, device=device)
     logger.info("Linear approximation layers trained and integrated into the model.")
 
     # ------------------------------------------------------------
@@ -304,7 +343,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         import json
 
         # Save merged model
-        torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_merged.pth")
+        torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_compressed.pth")
 
         # Save results
         results = {

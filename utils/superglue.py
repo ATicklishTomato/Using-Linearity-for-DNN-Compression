@@ -175,8 +175,8 @@ def load_datasets(
 
     # Cache key encodes every factor that affects the final tensors
     task_key = "-".join(sorted(tasks)) if len(tasks) < len(SUPERGLUE_TASKS) else "all"
-    cache_train = f"./data/superglue_{task_key}_train_{seed}_{batch_size}"
-    cache_val   = f"./data/superglue_{task_key}_val_{seed}_{batch_size}"
+    cache_train = f"./data/superglue_{task_key}_train_{seed}"
+    cache_val   = f"./data/superglue_{task_key}_val_{seed}"
 
     if os.path.exists(cache_train) and os.path.exists(cache_val):
         train_set = load_from_disk(cache_train)

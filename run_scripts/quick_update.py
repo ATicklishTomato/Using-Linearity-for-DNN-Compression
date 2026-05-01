@@ -1,8 +1,8 @@
 
 
 path = "./*/*/*/llama*/*/*.bash"
-target = "python -m venv .venv"
-replace = "mkdir -p /scratch-shared/lwubben/data\npython -m venv .venv"
+target = "gpu_mig"
+replace = "gpu_a100"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path

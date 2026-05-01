@@ -2,7 +2,7 @@
 
 #SBATCH --job-name=llama_relation_mag4
 #SBATCH --output=llama_relation_mag4_output_%j.txt
-#SBATCH --partition gpu_mig
+#SBATCH --partition gpu_a100
 #SBATCH --gpus=1
 #SBATCH --time=08:00:00
 #SBATCH --nodes=1

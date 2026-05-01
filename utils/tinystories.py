@@ -22,10 +22,10 @@ def load_datasets(tokenizer, batch_size, reduction_fraction=0.1, seed=42):
     if not os.path.exists("./data"):
         os.makedirs("./data", exist_ok=True)
 
-    if (os.path.exists(f"./data/tiny_stories_train_{seed}_{batch_size}")
-            and os.path.exists(f"./data/tiny_stories_val_{seed}_{batch_size}")):
-        train_set = Dataset.load_from_disk(f"./data/tiny_stories_train_{seed}_{batch_size}")
-        val_set = Dataset.load_from_disk(f"./data/tiny_stories_val_{seed}_{batch_size}")
+    if (os.path.exists(f"./data/tiny_stories_train_{seed}")
+            and os.path.exists(f"./data/tiny_stories_val_{seed}")):
+        train_set = Dataset.load_from_disk(f"./data/tiny_stories_train_{seed}")
+        val_set = Dataset.load_from_disk(f"./data/tiny_stories_val_{seed}")
         logger.info("Datasets loaded from disk.")
     else:
         train_set = load_dataset("roneneldan/TinyStories", split="train")
@@ -36,8 +36,8 @@ def load_datasets(tokenizer, batch_size, reduction_fraction=0.1, seed=42):
         logger.debug("Datasets loaded and preprocessed.")
 
         # Save to disk for faster loading later
-        train_set.save_to_disk(f"./data/tiny_stories_train_{seed}_{batch_size}")
-        val_set.save_to_disk(f"./data/tiny_stories_val_{seed}_{batch_size}")
+        train_set.save_to_disk(f"./data/tiny_stories_train_{seed}")
+        val_set.save_to_disk(f"./data/tiny_stories_val_{seed}")
         logger.info("Datasets saved to disk.")
 
     # Reduce dataset size for faster experimentation
