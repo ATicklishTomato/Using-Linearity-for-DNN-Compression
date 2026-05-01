@@ -270,8 +270,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         blocks (Union[None, list]): The list of blocks to use for distilled resnet.
         hidden_layer_reduction (int): The number of hidden layers to remove for distilled llama.
     """
-    short_model = "llama" if "llama" in model else "resnet"
-    save_dir = "./results/rq2/" + linearity + "/" + relation_to + "/" + short_model + "/" + dataset + "/" + str(seed)
+    save_dir = "./results/rq2/" + linearity + "/" + relation_to + "/" + model + "/" + dataset + "/" + str(seed)
     os.makedirs(save_dir, exist_ok=True)
 
     # ------------------------------------------------------------

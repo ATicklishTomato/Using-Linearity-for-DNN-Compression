@@ -37,8 +37,7 @@ def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, d
         None if return_for_relation is False, otherwise a dictionary containing the pruning ratios and student networks for relation analysis.
     """
     logger.info(f"Running benchmark compression methods for model {model_name} on dataset {dataset}.")
-    model_dir_name = "llama" if "llama" in model_name else "resnet"
-    save_dir = "./results/rq1/benchmarks/" + model_dir_name + "/" + dataset + "/" + str(seed)
+    save_dir = "./results/rq1/benchmarks/" + model_name + "/" + dataset + "/" + str(seed)
     os.makedirs(save_dir, exist_ok=True)
 
     # Load the model and dataset

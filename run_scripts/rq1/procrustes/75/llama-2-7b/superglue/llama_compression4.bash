@@ -12,9 +12,10 @@
 
 # Only load python because PyTorch module is garbage on this cluster
 module purge
-module load 2023
-module load PyTorch/2.1.2-foss-2023a-CUDA-12.1.1
+module load 2024
+module load Python/3.12.3-GCCcore-13.3.0
 
+mkdir -p /scratch-shared/lwubben/data
 python -m venv .venv
 source .venv/bin/activate # Activate virtual environment
 

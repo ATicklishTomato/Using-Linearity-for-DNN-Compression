@@ -30,11 +30,13 @@ def parse_args():
                         default='imagenet',
                         help='Dataset to use for training and evaluation.')
     parser.add_argument('-e', '--experiment', type=str,
-                        choices=['relation', 'compression', 'benchmark_compression'],
+                        choices=['relation', 'compression', 'linear_approximator_compression', 'benchmark_compression'],
                         default='compression',
                         help='The type of experiment to run. "relation" tests the relation between ' +
                              'inherent linearity and another compression method. "compression" tests ' +
-                             'inherent linearity as a tool for compression. "benchmark_compression" runs other compression methods to allow a comparison.')
+                             'layer merging for ResNets or linear approximation for Llama. ' +
+                             '"linear_approximator_compression" tests linear approximation for ResNets. ' +
+                             '"benchmark_compression" runs other compression methods to allow a comparison.')
     parser.add_argument('--relation', type=str,
                         choices=['magnitude_pruning', 'basic_kd'],
                         default='magnitude_pruning',
@@ -146,12 +148,16 @@ if __name__ == '__main__':
     logger.info(f"Starting experiment with configuration: {wandb_config}")
 
     match (args.model, args.experiment):
-        case ('llama-2-7b' | 'llama-2-13b' | 'llama-3-1b' | 'llama-3-3b', 'compression'):
+        case ('llama-2-7b' | 'llama-3-1b' | 'llama-3-3b', 'compression' | 'linear_approximator_compression'):
             from experiments.llama_approx_compression import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
                            args.epochs, args.lr, args.data_fraction, args.save, args.seed, args.device)
         case ('resnet18' | 'resnet34' | 'resnet50', 'compression'):
             from experiments.resnet_fold_compression import run_experiment
+            run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
+                           args.epochs, args.lr, args.data_fraction, args.save, args.seed, args.device)
+        case ('resnet18' | 'resnet34' | 'resnet50', 'linear_approximator_compression'):
+            from experiments.resnet_approx_compression import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
                            args.epochs, args.lr, args.data_fraction, args.save, args.seed, args.device)
         case (_, 'benchmark_compression'):

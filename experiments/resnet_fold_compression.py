@@ -13,34 +13,34 @@ import utils.util_functions as utils
 
 logger = logging.getLogger(__name__)
 
-def fold_linear_conv_sequences(
+def merge_linear_conv_sequences(
     model,
     linear_layers,
     device='cuda'
 ):
     """
-    Fold Conv-BN-ReLU-Conv sequences when the activation is near-linear.
+    Merge Conv-BN-ReLU-Conv sequences when the activation is near-linear.
 
     Args:
         model (nn.Module): ResNet-like model (unchanged architecture)
         linear_layers (dict): {conv_layer_name: linearity_score}
-        device (str): Device to perform folding on (e.g., 'cpu', 'cuda')
+        device (str): Device to perform merging on (e.g., 'cpu', 'cuda')
 
     Returns:
-        folded_model (nn.Module)
-        folded_pairs (list of tuples)
+        merged_model (nn.Module)
+        merged_pairs (list of tuples)
     """
-    folded_pairs = []
+    merged_pairs = []
     model.to(device)
 
-    logger.info("\n[Layer Folding] Starting folding pass")
+    logger.info("\n[Layer Merging] Starting merging pass")
 
     # ------------------------------------------------------------
-    # Helper: fold BN into Conv
+    # Helper: merge BN into Conv
     # ------------------------------------------------------------
-    def fold_bn_into_conv(conv, bn):
+    def merge_bn_into_conv(conv, bn):
         """
-        Fold a batchnorm layer into its own conv layer by applying its scaling and shifting to the conv weights and biases.
+        Merge a batchnorm layer into its own conv layer by applying its scaling and shifting to the conv weights and biases.
         This effectively removes the batchnorm layer while preserving the same transformations.
         Args:
             conv (nn.Conv2d): Convolutional layer
@@ -48,7 +48,7 @@ def fold_linear_conv_sequences(
         Returns:
             None. Convolutional layer is modified in place
         """
-        logger.debug(f"    Folding BatchNorm into Conv ({conv.out_channels} channels)")
+        logger.debug(f"    Mergeing BatchNorm into Conv ({conv.out_channels} channels)")
 
         W = conv.weight
         if conv.bias is None:
@@ -63,18 +63,18 @@ def fold_linear_conv_sequences(
         eps = bn.eps
 
         std = torch.sqrt(var + eps)
-        W_folded = W * (gamma / std).reshape(-1, 1, 1, 1)
-        b_folded = beta + (bias - mean) * gamma / std
+        W_merged = W * (gamma / std).reshape(-1, 1, 1, 1)
+        b_merged = beta + (bias - mean) * gamma / std
 
-        conv.weight.data.copy_(W_folded)
-        conv.bias = nn.Parameter(b_folded)
+        conv.weight.data.copy_(W_merged)
+        conv.bias = nn.Parameter(b_merged)
 
     # ------------------------------------------------------------
-    # Helper: fold Conv → Conv
+    # Helper: merge Conv → Conv
     # ------------------------------------------------------------
-    def fold_convs(conv1, conv2):
+    def merge_convs(conv1, conv2):
         """
-        Folds to convolutional layers into each other, creating one big convolutional layer that performs the same transformations as the two in direct sequence.
+        Merges to convolutional layers into each other, creating one big convolutional layer that performs the same transformations as the two in direct sequence.
         Args:
             conv1 (nn.Conv2d): Convolutional layer
             conv2 (nn.Conv2d): Convolutional layer
@@ -82,7 +82,7 @@ def fold_linear_conv_sequences(
             new_conv (nn.Conv2d): New convolutional layer that performs the same transformations.
         """
         logger.debug(
-            f"    Folding Conv layers: "
+            f"    Mergeing Conv layers: "
             f"{conv1.in_channels}→{conv1.out_channels}→{conv2.out_channels}"
         )
 
@@ -92,7 +92,7 @@ def fold_linear_conv_sequences(
         C_mid, C_in, k1, _ = W1.shape
         C_out, C_mid2, k2, _ = W2.shape
 
-        k_fold = k1 + k2 - 1
+        k_merge = k1 + k2 - 1
 
         # ---------------------------------------------------------
         # Flip W2 because conv2d does cross-correlation
@@ -106,8 +106,8 @@ def fold_linear_conv_sequences(
         # Treat each (out_channel, mid_channel) kernel in W2 as a
         # conv filter applied to all matching W1[mid_channel, in_channel]
         # ---------------------------------------------------------
-        W_fold = torch.zeros(
-            (C_out, C_in, k_fold, k_fold),
+        W_merge = torch.zeros(
+            (C_out, C_in, k_merge, k_merge),
             device=W1.device,
             dtype=W1.dtype,
         )
@@ -123,29 +123,29 @@ def fold_linear_conv_sequences(
             w = W2_flip[:, j].unsqueeze(1)
 
             # Apply all output filters to all input kernels
-            # output: [C_in, C_out, k_fold, k_fold]
+            # output: [C_in, C_out, k_merge, k_merge]
             out = F.conv2d(
                 x,
                 w,
                 padding=k2 - 1
             )
 
-            # Rearrange to [C_out, C_in, k_fold, k_fold]
+            # Rearrange to [C_out, C_in, k_merge, k_merge]
             out = out.permute(1, 0, 2, 3)
 
-            W_fold += out
+            W_merge += out
 
         # ---------------------------------------------------------
-        # Build folded conv
+        # Build merged conv
         # ---------------------------------------------------------
         new_conv = nn.Conv2d(
             in_channels=C_in,
             out_channels=C_out,
-            kernel_size=k_fold,
-            padding=k_fold // 2,
+            kernel_size=k_merge,
+            padding=k_merge // 2,
             bias=False,
         ).to(W1.device)
-        new_conv.weight.data.copy_(W_fold)
+        new_conv.weight.data.copy_(W_merge)
 
         return new_conv
 
@@ -188,7 +188,7 @@ def fold_linear_conv_sequences(
                 logger.debug("    Below threshold → ReLU not linear")
                 continue
 
-            # Validate foldability
+            # Validate mergeability
             if (
                 conv1.stride != (1, 1)
                 or conv2.stride != (1, 1)
@@ -199,17 +199,17 @@ def fold_linear_conv_sequences(
                 continue
 
             logger.debug("    Linearity condition satisfied")
-            logger.debug("    Removing BatchNorm and ReLU, folding Convs")
+            logger.debug("    Removing BatchNorm and ReLU, merging Convs")
 
             # ----------------------------------------------------
-            # Fold BN → Conv1
+            # Merge BN → Conv1
             # ----------------------------------------------------
-            fold_bn_into_conv(conv1, bn1)
+            merge_bn_into_conv(conv1, bn1)
 
             # ----------------------------------------------------
-            # Fold Conv1 → Conv2
+            # Merge Conv1 → Conv2
             # ----------------------------------------------------
-            new_conv = fold_convs(conv1, conv2)
+            new_conv = merge_convs(conv1, conv2)
             new_conv.to(device)
 
             # ----------------------------------------------------
@@ -220,17 +220,17 @@ def fold_linear_conv_sequences(
             setattr(module, 'relu', nn.Identity())
             setattr(module, 'conv2', nn.Identity())
 
-            folded_pairs.append((conv1_name, f"{module_name}.{idx}.conv2"))
+            merged_pairs.append((conv1_name, f"{module_name}.{idx}.conv2"))
 
-            logger.debug("    Folding complete")
+            logger.debug("    Merging complete")
 
-    logger.info(f"\n[Layer Folding] Done. Folded {len(folded_pairs)} layer pairs.\n")
+    logger.info(f"\n[Layer Merging] Done. Merged {len(merged_pairs)} layer pairs.\n")
 
-    return folded_pairs
+    return merged_pairs
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
                            epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str, sweep: bool=False):
-    """Run the ResNet compression experiment. Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
+    """Run ResNet compression experiment with layer merging. Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
     Args:
         model (str): The ResNet architecture to use (e.g., 'resnet18').
         linearity (str): The linearity metric to use (e.g., 'mean_preactivation', 'procrustes', or 'fraction').
@@ -245,7 +245,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
         sweep (bool): Flag that indicates whether an additional metric should be computed to use for a W&B sweep.
     """
-    save_dir = "./results/rq1/" + linearity + "/" + threshold.split(".")[-1].split("%")[0] + "/resnet/" + dataset + "/" + str(seed)
+    save_dir = "./results/rq1/" + linearity + "/" + threshold.split(".")[-1].split("%")[0] + "/" + model + "/" + dataset + "/" + str(seed)
     os.makedirs(save_dir, exist_ok=True)
 
     # ------------------------------------------------------------
@@ -280,18 +280,18 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     logger.info(f"Determined non-linear layers: {nonlinear_layers}")
 
     # ------------------------------------------------------------
-    # Fold layers based on linearity scores
+    # Merge layers based on linearity scores
     # ------------------------------------------------------------
-    folded_pairs = fold_linear_conv_sequences(experimenter.model, linear_layers)
-    logger.debug(f"Folded layer pairs: {folded_pairs}")
+    merged_pairs = merge_linear_conv_sequences(experimenter.model, linear_layers)
+    logger.debug(f"Merged layer pairs: {merged_pairs}")
     experimenter.finetune()
-    logger.info(f"Folded {len(folded_pairs)} blocks in model and fine-tuned")
+    logger.info(f"Merged {len(merged_pairs)} blocks in model and fine-tuned")
 
     # ------------------------------------------------------------
-    # Evaluate folded model performance
+    # Evaluate merged model performance
     # ------------------------------------------------------------
     compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = experimenter.validate_model()
-    logger.info(f"Folded model accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, "
+    logger.info(f"Merged model accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, "
                 f"inference time: {compressed_inference_time:.4f} seconds, gflops: {compressed_gflops}")
 
     accuracy_loss = utils.accuracy_loss(original_accuracy, compressed_accuracy)
@@ -307,8 +307,8 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     if save:
         import json
 
-        # Save folded model
-        torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_folded.pth")
+        # Save merged model
+        torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_merged.pth")
 
         # Save results
         results = {
@@ -320,15 +320,15 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
             "compressed_param_count": compressed_param_count,
             "compressed_inference_time": compressed_inference_time,
             "compressed_gflops": compressed_gflops,
-            "compressed_groups": folded_pairs,
+            "compressed_groups": merged_pairs,
             "accuracy_loss": accuracy_loss,
             "param_compression_ratio": param_compression_ratio,
             "speedup": speedup,
             "gflop_reduction": gflop_reduction,
         }
-        with open(f"{save_dir}/{model}_folding_results.json", "w") as f:
+        with open(f"{save_dir}/{model}_merging_results.json", "w") as f:
             json.dump(results, f, indent=4)
-        logger.info(f"Saved folded model and results to {save_dir}/{model}_folded.pth and {save_dir}/{model}_folding_results.json")
+        logger.info(f"Saved merged model and results to {save_dir}/{model}_merged.pth and {save_dir}/{model}_merging_results.json")
 
     logging_data = {
         "original_accuracy": original_accuracy,
@@ -339,7 +339,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         "compressed_param_count": compressed_param_count,
         "compressed_inference_time": compressed_inference_time,
         "compressed_gflops": compressed_gflops,
-        "compressed_groups": folded_pairs,
+        "compressed_groups": merged_pairs,
         "accuracy_loss": accuracy_loss,
         "param_compression_ratio": param_compression_ratio,
         "speedup": speedup,

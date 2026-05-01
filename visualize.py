@@ -111,7 +111,7 @@ def generate_latex_results_table(mean_results, args, path):
     with open(path + '/results.tex', 'w') as f:
         f.write(table)
 
-def mean_benchmark_results(path, base_metrics_path="./results/rq1/mean_preactivation/75/resnet/imagenet/**/*results.json"):
+def mean_benchmark_results(path, base_metrics_path="./results/rq1/mean_preactivation/75/resnet18/imagenet/**/*results.json"):
     import json
     import glob
     comp_metrics = ['comp_acc', 'comp_params', 'comp_infer', 'comp_gflops']
@@ -201,14 +201,13 @@ if __name__ == '__main__':
     args = parse_args()
     print(f"Aggregating results for RQ: {args.rq}, Threshold: {args.threshold}, Model: {args.model}, Dataset: {args.dataset}, Relation: {args.relation_to}" +
       f", Linearity: {args.linearity}")
-    base_model_name = "resnet" if "resnet" in args.model else "llama"
     if args.rq == 'rq1':
-        path = f"./results/{args.rq}/{args.linearity}/{args.threshold}/{base_model_name}/{args.dataset}/"
+        path = f"./results/{args.rq}/{args.linearity}/{args.threshold}/{args.model}/{args.dataset}/"
     elif args.rq == 'rq2':
-        path = f"./results/{args.rq}/{args.linearity}/{args.relation_to}/{base_model_name}/{args.dataset}/"
+        path = f"./results/{args.rq}/{args.linearity}/{args.relation_to}/{args.model}/{args.dataset}/"
     elif args.rq == 'benchmark':
-        path = f"./old_results/rq2/{args.relation_to}/{base_model_name}/{args.dataset}/"
-        # path = f"./results/rq2/{args.linearity}/{args.relation_to}/{base_model_name}/{args.dataset}/"
+        path = f"./old_results/rq2/{args.relation_to}/{args.model}/{args.dataset}/"
+        # path = f"./results/rq2/{args.linearity}/{args.relation_to}/{args.model}/{args.dataset}/"
     else:
         raise ValueError("Invalid RQ choice. Must be one of 'rq1', 'rq2', or 'benchmark'.")
 
@@ -229,7 +228,7 @@ if __name__ == '__main__':
             else:
                 raise NotImplementedError
         case 'benchmark':
-            base_performance_path = f"./results/rq1/{args.linearity}/{args.threshold}/{base_model_name}/{args.dataset}/**/*results.json"
+            base_performance_path = f"./results/rq1/{args.linearity}/{args.threshold}/{args.model}/{args.dataset}/**/*results.json"
             mean_bench = mean_benchmark_results(path, base_metrics_path=base_performance_path)
             print("Benchmark results:", mean_bench)
             generate_latex_results_table(mean_bench, args, path)

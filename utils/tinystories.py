@@ -20,7 +20,7 @@ def preprocess(examples, tokenizer):
 def load_datasets(tokenizer, batch_size, reduction_fraction=0.1, seed=42):
 
     if not os.path.exists("./data"):
-        os.makedirs("./data")
+        os.makedirs("./data", exist_ok=True)
 
     if (os.path.exists(f"./data/tiny_stories_train_{seed}_{batch_size}")
             and os.path.exists(f"./data/tiny_stories_val_{seed}_{batch_size}")):
