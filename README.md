@@ -18,7 +18,7 @@ It will eventually contain all experiments and related artifacts.
 - `requirements.txt` \- Python dependencies
 
 ## Requirements
-Use a virtual environment or conda environment to avoid conflicts with other projects. Python 3.11 is recommended.
+Use a virtual environment or conda environment to avoid conflicts with other projects. Python 3.11 or higher is recommended.
 
 Install dependencies:
 ```bash

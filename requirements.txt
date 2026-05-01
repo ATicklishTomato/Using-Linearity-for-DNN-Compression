@@ -1,16 +1,17 @@
---find-links https://download.pytorch.org/whl/cu121
-torchvision
-torch-pruning
-torch
-numpy
-matplotlib
-tqdm
-llama-models
-transformers
-huggingface_hub
-datasets
-accelerate
-sentencepiece
-pandas
-pandas-stubs
-wandb
+--index-url https://download.pytorch.org/whl/cu121
+--extra-index-url https://pypi.org/simple
+torchvision==0.20.1+cu121
+torch-pruning==1.6.1
+torch==2.5.1+cu121
+numpy==2.3.5
+matplotlib==3.10.8
+tqdm==4.67.3
+llama-models==0.3.0
+transformers==5.1.0
+huggingface_hub==1.4.1
+datasets==4.5.0
+accelerate==1.12.0
+sentencepiece==0.2.1
+pandas==3.0.0
+pandas-stubs==3.0.0.260204
+wandb==0.24.2
