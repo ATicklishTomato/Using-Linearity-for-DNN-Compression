@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 import numpy as np
 import torch
@@ -229,7 +230,8 @@ def merge_linear_conv_sequences(
     return merged_pairs
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
-                           epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str, sweep: bool=False):
+                   epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str,
+                   skip_finetune_path: Optional[str], sweep: bool=False):
     """Run ResNet compression experiment with layer merging. Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
     Args:
         model (str): The ResNet architecture to use (e.g., 'resnet18').
@@ -243,6 +245,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         save (bool): Whether to save the trained models and results.
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
+        skip_finetune_path (str): The path to look for a finetuned model saved to disk if skipping is enabled.
         sweep (bool): Flag that indicates whether an additional metric should be computed to use for a W&B sweep.
     """
     save_dir = "./results/rq1/" + linearity + "/" + threshold.split(".")[-1].split("%")[0] + "/" + model + "/" + dataset + "/" + str(seed)
@@ -254,12 +257,15 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     logger.info(f"Running ResNet compression experiment with model={model}, linearity={linearity}, dataset={dataset}, threshold={threshold}, batch_size={batch_size}, epochs={epochs}, lr={lr}, data fraction={data_fraction}, save={save}, seed={seed}, device={device}")
     data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, data_fraction=data_fraction, seed=seed)
     logger.debug(f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
-    experimenter = ResNetExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, device=device)
+    experimenter = ResNetExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs,
+                                      learning_rate=lr, device=device, skip_finetune_path=skip_finetune_path)
     logger.info("Model and data loaded, model fine-tuned.")
-    if save:
+    if save and skip_finetune_path is None:
         # Save finetuned original
         torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_original.pth")
         logger.info(f"Saved finetuned original model to {save_dir}/{model}_original.pth")
+    elif save:
+        logger.info(f"Skipping saving finetuned model as it was loaded from disk. Loaded from {skip_finetune_path}.")
 
     # ------------------------------------------------------------
     # Evaluate initial model performance

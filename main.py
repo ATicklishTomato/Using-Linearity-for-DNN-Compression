@@ -66,6 +66,9 @@ def parse_args():
                         help='Enable verbose logging.')
     parser.add_argument('--save', action='store_true',
                         help='Save the trained models and results to ./results directory.')
+    parser.add_argument('--skip_finetune', action='store_true',
+                        help='Set this flag in order to attempt finetune skipping. Instead, the Experimenter class will '
+                             'attempt to load a finetuned model from the results directory that matches the model, dataset, and random seed')
     parser.add_argument('--wandb_project', type=str, default=None,
                         help='Weights & Biases project name for logging.')
     parser.add_argument('--wandb_tags',
@@ -91,6 +94,13 @@ if __name__ == '__main__':
         else:
             args.data_fraction = 1.0 # fallback
 
+    skip_finetune_path = None
+    if args.skip_finetune and "llama" in args.model:
+        skip_finetune_path = f"./results/**/{args.model}/{args.dataset}/{args.seed}/original_{args.model}"
+    elif args.skip_finetune:
+        skip_finetune_path = f"./results/**/{args.model}/{args.dataset}/{args.seed}/{args.model}_original.pth"
+
+
     logging.basicConfig(
         filename=f'run-{args.model}-{datetime.now().strftime("%Y%m%d-%H%M%S")}.log',
         level= logging.DEBUG if args.verbose else logging.INFO,
@@ -109,6 +119,7 @@ if __name__ == '__main__':
         'epochs': args.epochs,
         'learning_rate': args.lr,
         'data_fraction': args.data_fraction,
+        'skip_finetune': args.skip_finetune
     }
 
     if os.path.exists('wandb.login'):
@@ -151,23 +162,27 @@ if __name__ == '__main__':
         case ('llama-2-7b' | 'llama-3-1b' | 'llama-3-3b', 'compression' | 'linear_approximator_compression'):
             from experiments.llama_approx_compression import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
-                           args.epochs, args.lr, args.data_fraction, args.save, args.seed, args.device)
+                           args.epochs, args.lr, args.data_fraction, args.save, args.seed, args.device,
+                           skip_finetune_path)
         case ('resnet18' | 'resnet34' | 'resnet50', 'compression'):
             from experiments.resnet_fold_compression import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
-                           args.epochs, args.lr, args.data_fraction, args.save, args.seed, args.device)
+                           args.epochs, args.lr, args.data_fraction, args.save, args.seed, args.device,
+                           skip_finetune_path)
         case ('resnet18' | 'resnet34' | 'resnet50', 'linear_approximator_compression'):
             from experiments.resnet_approx_compression import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.threshold, args.batch_size,
-                           args.epochs, args.lr, args.data_fraction, args.save, args.seed, args.device)
+                           args.epochs, args.lr, args.data_fraction, args.save, args.seed, args.device,
+                           skip_finetune_path)
         case (_, 'benchmark_compression'):
-            from experiments.benchmark_compression import benchmark_compression_methods
-            benchmark_compression_methods(args.model, args.dataset, args.batch_size, args.epochs, args.lr,
-                                          args.data_fraction, args.save, args.seed, args.device)
+            from experiments.benchmark_compression import run_experiment
+            run_experiment(args.model, args.dataset, args.batch_size, args.epochs, args.lr,
+                           args.data_fraction, args.save, args.seed, args.device,
+                           skip_finetune_path)
         case (_, 'relation'):
             from experiments.relation import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.relation, args.batch_size, args.epochs, args.lr,
-                                          args.data_fraction, args.save, args.seed, args.device)
+                                          args.data_fraction, args.save, args.seed, args.device, skip_finetune_path)
         case _:
             logger.error("Invalid combination of model, experiment, and relation.")
             raise ValueError("Invalid combination of model, experiment, and relation.")

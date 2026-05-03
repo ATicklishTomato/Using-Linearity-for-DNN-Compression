@@ -1,3 +1,4 @@
+import glob
 import time
 
 import torch
@@ -14,13 +15,14 @@ logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 class ResNetExperimenter:
-    def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, device='cuda'):
+    def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, device='cuda', skip_finetune_path = None):
         self.model_name = model_name
         self.data_handler = data_handler
         self.batch_size = batch_size
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.device = device
+        self.skip_finetune_path = skip_finetune_path
 
         match model_name:
             case "resnet18":
@@ -32,7 +34,18 @@ class ResNetExperimenter:
             case _:
                 raise ValueError(f"Unsupported model: {model_name}.")
 
-        self.finetune()
+        if skip_finetune_path is not None:
+            try:
+                logger.info("Skip finetune path is set. Attempting to find finetuned model to load")
+                path = str(glob.glob(self.skip_finetune_path, recursive=True)[0]) # We just take the first instance
+                logger.info(f"Found save path {path}, attempting to load")
+                self.model.load_state_dict(torch.load(path, weights_only=True))
+                logger.info("Loaded finetuned model from file")
+            except Exception as e:
+                logger.info(f"Failed to load model due to {e}. Finetuning anyway")
+                self.finetune()
+        else:
+            self.finetune()
 
     def _initialize_resnet_model(self, layers):
         """Initialize a ResNet model with the specified number of layers."""

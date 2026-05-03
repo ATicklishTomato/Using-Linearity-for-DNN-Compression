@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Optional
 
 import numpy as np
 import torch
@@ -216,7 +216,8 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
 
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
-                           epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str, sweep: bool=False):
+                   epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str,
+                   skip_finetune_path: Optional[str], sweep: bool=False):
     """Run the Llama compression experiment. Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
     Args:
         model (str): The ResNet architecture to use (e.g., 'llama-2-7b').
@@ -230,6 +231,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         save (bool): Whether to save the trained models and results.
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
+        skip_finetune_path (str): The path to look for a finetuned model saved to disk if skipping is enabled.
         sweep (bool): Flag that indicates whether an additional metric should be computed to use for a W&B sweep.
     """
     save_dir = "./results/rq1/" + linearity + "/" + threshold.split(".")[-1].split("%")[0] + "/" + model + "/" + dataset + "/" + str(seed)
@@ -242,12 +244,15 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         f"Running Llama compression experiment with model: {model}, linearity metric: {linearity}, dataset: {dataset}, threshold: {threshold}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, data fraction: {data_fraction}, save results: {save}, seed: {seed}, device: {device}")
     data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, data_fraction=data_fraction, model_name=model, seed=seed)
     logger.debug(f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
-    experimenter = LlamaExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs, learning_rate=lr, device=device)
+    experimenter = LlamaExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs,
+                                     learning_rate=lr, device=device, skip_finetune_path=skip_finetune_path)
     logger.info("Model initialized.")
-    if save:
+    if save and skip_finetune_path is None:
         # Save original finetuned model
         experimenter.model.save_pretrained(f"{save_dir}/original_{model}")
         logger.info(f"Original finetuned model saved to {save_dir}/original_{model}")
+    elif save:
+        logger.info(f"Skipping saving finetuned model as it was loaded from disk. Loaded from {skip_finetune_path}.")
 
     # ------------------------------------------------------------
     # Evaluate initial model performance

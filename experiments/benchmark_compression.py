@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Optional
 
 import torch
 import wandb
@@ -15,8 +16,9 @@ from utils.resnet_model import ResNetExperimenter
 
 logger = logging.getLogger(__name__)
 
-def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, data_fraction, save, seed, device,
-                                  pruning_ratio=0.5, blocks=None, hidden_layer_reduction=2, return_for_relation=False):
+def run_experiment(model_name, dataset, batch_size, epochs, lr, data_fraction, save,
+                   seed, device, skip_finetune_path: Optional[str], pruning_ratio=0.5, blocks=None,
+                   hidden_layer_reduction=2, return_for_relation=False):
     """
     Run other compression methods on a given model and dataset to compare performance against linearity-based compression.
     Args:
@@ -29,6 +31,7 @@ def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, d
         save (bool): Whether to save the trained models and results.
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
+        skip_finetune_path (str): The path to look for a finetuned model saved to disk if skipping is enabled.
         pruning_ratio (float): Pruning ratio for pruning (e.g., 0.5).
         blocks: Blocks layout for the student ResNet model. Default is [2,2,2]. Ignored for Llama model.
         hidden_layer_reduction: Number of hidden layers to remove for student Llama model. Default is 2, meaning that 18 layers of Llama-3.2-1b will become 16 layers. Ignored for ResNet model.
@@ -47,10 +50,10 @@ def benchmark_compression_methods(model_name, dataset, batch_size, epochs, lr, d
         f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
     if "llama" in model_name:
         experimenter = LlamaExperimenter(model_name=model_name, data_handler=data_handler, batch_size=batch_size, epochs=epochs,
-                                         learning_rate=lr, device=device)
+                                         learning_rate=lr, device=device, skip_finetune_path=skip_finetune_path)
     elif "resnet" in model_name:
         experimenter = ResNetExperimenter(model_name=model_name, data_handler=data_handler, batch_size=batch_size,
-                                          epochs=epochs, learning_rate=lr,  device=device)
+                                          epochs=epochs, learning_rate=lr,  device=device, skip_finetune_path=skip_finetune_path)
     else:
         raise ValueError(f"Unknown model name: {model_name}")
     logger.info("Model initialized.")

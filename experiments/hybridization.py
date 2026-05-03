@@ -20,245 +20,17 @@ import utils.util_functions as utils
 
 logger = logging.getLogger(__name__)
 
-def _get_target_layers(model):
-    if "resnet" in model.__class__.__name__.lower():
-        pattern = r".*conv.*"
-    elif "llama" in model.__class__.__name__.lower():
-        pattern = r"model\.layers\..*\.self_attn"
-    else:
-        raise ValueError("Unsupported model type")
-
-    layers = []
-    names = []
-
-    for name, module in model.named_modules():
-        if re.match(pattern, name):
-            layers.append(module)
-            names.append(name)
-
-    return layers, names
-
-
-def _process_output(output, attention_mask=None):
-    """
-    Convert layer outputs to [B, D]
-    """
-    if isinstance(output, tuple):
-        output = output[0]
-
-    if output.dim() == 4:
-        # CNN output [B,C,H,W] -> global avg pool -> [B,C]
-        output = output.mean(dim=(2, 3))
-
-    elif output.dim() == 3:
-        # Transformer [B,S,H] -> token mean -> [B,H]
-        # We want to avoid including padding in computation if possible
-        if attention_mask is not None:
-            attention_mask = attention_mask.unsqueeze(-1).to(output.dtype)  # [B, S, 1]
-            output = (output * attention_mask).sum(dim=1) / attention_mask.sum(dim=1).clamp(min=1)
-        else:
-            output = output.mean(dim=1)
-
-    elif output.dim() == 2:
-        pass
-
-    else:
-        raise ValueError(f"Unexpected shape {output.shape}")
-
-    return output.detach()
-
-
-def _collect_activations(model, x, layers, device):
-    acts = []
-
-    def hook_fn(module, inp, out):
-
-        # If there is an attention mask in input, we pass it to processing function
-        attention_mask = x["attention_mask"] if isinstance(x, dict) and "attention_mask" in x else None
-        if "llama" in model.__class__.__name__.lower() and attention_mask is None:
-            logger.warning("Failed to grab attention mask")
-
-        acts.append(_process_output(out, attention_mask).to(device))
-
-    hooks = [layer.register_forward_hook(hook_fn) for layer in layers]
-
-    model.eval()
-    with torch.no_grad():
-        if isinstance(x, dict):
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                model(**x)
-        else:
-            model(x)
-
-    for h in hooks:
-        h.remove()
-
-    return acts
-
-
-def _linear_cka_fast(X, Y):
-    """
-    Memory-efficient linear CKA.
-    X: [N, Dx]
-    Y: [N, Dy]
-    """
-    X = X.float()
-    Y = Y.float()
-
-    X = X - X.mean(dim=0, keepdim=True)
-    Y = Y - Y.mean(dim=0, keepdim=True)
-
-    hsic = torch.norm(X.T @ Y, p="fro") ** 2
-    norm_x = torch.norm(X.T @ X, p="fro")
-    norm_y = torch.norm(Y.T @ Y, p="fro")
-
-    return (hsic / (norm_x * norm_y + 1e-8)).item()
-
-
-def cka_similarity_matrix(model_a, model_b, dataloader, device="cuda", tokenizer=None):
-    """
-    Computes a CKA similarity matrix between layers of two models.
-
-    Args:
-        model_a: First model (e.g. teacher)
-        model_b: Second model (e.g. student)
-        dataloader: DataLoader providing input batches
-        device: device to run on
-        tokenizer: Optional tokenizer for text data (only needed if models are LLaMA)
-    Returns:
-        np.ndarray of shape (m, n)
-    """
-    model_a.to(device).eval()
-    model_b.to(device).eval()
-
-    layers_a, names_a = _get_target_layers(model_a)
-    layers_b, names_b = _get_target_layers(model_b)
-
-    m, n = len(layers_a), len(layers_b)
-
-    acts_a_all = [[] for _ in range(m)]
-    acts_b_all = [[] for _ in range(n)]
-
-    logger.info("Prepped for CKA computation, processing batches...")
-    for batch_idx, x in enumerate(dataloader):
-        if "resnet" in model_a.__class__.__name__.lower():
-            x, _ = x
-            x = x.to(device)
-
-        else:
-            x = tokenizer(
-                x["text"],
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-            )
-            x = {k: v.to(device) for k, v in x.items()}
-
-        acts_a = _collect_activations(model_a, x, layers_a, device)
-        acts_b = _collect_activations(model_b, x, layers_b, device)
-
-        for i in range(m):
-            acts_a_all[i].append(acts_a[i].cpu())
-
-        for j in range(n):
-            acts_b_all[j].append(acts_b[j].cpu())
-
-        del acts_a, acts_b
-        torch.cuda.empty_cache()
-
-    logger.info("Batches processed. Calculating CKA similarity matrix...")
-
-    # concatenate layer activations
-    acts_a_all = [torch.cat(v, dim=0) for v in acts_a_all]
-    acts_b_all = [torch.cat(v, dim=0) for v in acts_b_all]
-
-    # -------- compute CKA --------
-    matrix = np.zeros((m, n), dtype=np.float32)
-
-    for i in range(m):
-        Xa = acts_a_all[i]
-
-        for j in range(n):
-            Yb = acts_b_all[j]
-            matrix[i, j] = _linear_cka_fast(Xa, Yb)
-
-    logger.info("Calculated CKA similarity matrix.")
-
-    return matrix, names_a, names_b
-
-def visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, student_layer_names, linearity_scores):
-    """Creates a magma heatmap of the cka similarity matrix using matplotlib.
-    Shows row and column indexes to roughly identify layers. Similarity scores are listed in the cells.
-    Stores the visualization in ./results with the given filename.
-    Args:
-        matrix: A numpy array of shape (m, n) containing the cka similarity values between the layers.
-        save_dir: The directory to save the heatmap. Saved as "cka_similarity_heatmap.png" in the given directory.
-        teacher_layer_names: Names of the teacher layers.
-        student_layer_names: Names of the student layers.
-        linearity_scores: A list of the linearity scores for each layer (length m).
-    """
-    logger.info(f"Visualizing CKA similarity matrix with shape {matrix.shape} and saving to {save_dir}/cka_similarity_heatmap.png")
-    model_name = "llama" if "llama" in save_dir else "resnet"
-
-    ticks = []
-    x_labels = [name for name in student_layer_names if model_name == "resnet" or name.endswith('self_attn')]
-    y_labels = []
-    for i, name in enumerate(teacher_layer_names):
-        if name in linearity_scores:
-            score = linearity_scores[name]
-            ticks.append(i)
-            y_labels.append(f"{name} ({score:.4f})")
-
-    plt.imshow(matrix, cmap='magma', vmin=0, vmax=1, origin='upper')
-    plt.colorbar(label=f'CKA Similarity of {model_name} teacher and student layers')
-    plt.xlabel('Student model')
-    plt.ylabel('Teacher model')
-    # Move x-axis to top
-    plt.gca().xaxis.tick_top()
-    plt.gca().xaxis.set_label_position('top')
-    plt.xticks(ticks=range(len(x_labels)), labels=x_labels, rotation=90, fontsize=8)
-    plt.yticks(ticks=ticks, labels=y_labels, rotation=0, fontsize=8)
-    plt.tight_layout()
-    plt.savefig(f"{save_dir}/cka_similarity_heatmap.png")
-    plt.close()
-
-def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios: dict, save_dir: str) -> None:
-    """Creates a scatterplot of the linearity compression scores and pruning scores for each layer.
-    Points are labeled with their layer index. X-axis will be linearity score, Y-axis will be pruning score.
-    Args:
-        linearity_scores: A dictionary mapping layer names to linear scores.
-        pruning_ratios: A dictionary mapping layer names to pruning scores.
-        save_dir: The directory to save the scatterplot. Saved as "linearity_pruning_scatterplot.png" in the given directory.
-    """
-    layer_names = list(set(linearity_scores.keys()).intersection(set(pruning_ratios.keys())))
-    logger.info(f"Computing scatterplot for {len(layer_names)} layers out of total {len(linearity_scores) + len(pruning_ratios)} layers.")
-    linearity_values = [linearity_scores[name] for name in layer_names]
-    pruning_values = [pruning_ratios[name] for name in layer_names] # Invert ratios to show the fraction of pruned weights
-
-    plt.figure(figsize=(10, 6))
-    plt.scatter(linearity_values, pruning_values)
-
-    for i, name in enumerate(layer_names):
-        plt.annotate(name, (linearity_values[i], pruning_values[i]))
-
-    plt.xlabel('Linearity Compression Score')
-    plt.ylabel('Fraction of pruned weights')
-    plt.title('Linearity Compression Scores vs Pruning Ratios')
-    plt.grid()
-    plt.tight_layout()
-    plt.savefig(f"{save_dir}/linearity_pruning_scatterplot.png")
-    plt.close()
-
-def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, batch_size: int,
+def run_experiment(model: str, linearity: str, dataset: str, compression_method: str, batch_size: int,
                    epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str,
-                   skip_finetune_path: Optional[str], pruning_ratio: float=0.1, blocks: Union[None, list]=None, hidden_layer_reduction: int=2):
-    """Run the relation to other compression methods experiment.
+                   skip_finetune_path: Optional[str], pruning_ratio: float=0.1, blocks: Union[None, list]=None,
+                   hidden_layer_reduction: int=2):
+    """Attempt hybridization with other compression methods experiment.
     Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
     Args:
         model (str): The model architecture to use (e.g., 'resnet18', 'llama-3.2-1b').
         linearity (str): The linearity metric to use (e.g., 'mean_preactivation', 'procrustes', or 'fraction').
         dataset (str): The dataset to use (e.g., 'imagenet').
-        relation_to (str): The compression method identifier to compare against (e.g. 'magnitude_pruning', 'basic_kd')
+        compression_method (str): The compression method identifier to compare against (e.g. 'magnitude_pruning', 'basic_kd')
         batch_size (int): The batch size for training and evaluation.
         epochs (int): The number of epochs for fine-tuning.
         lr (float): The learning rate for the optimizer.
@@ -271,7 +43,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         blocks (Union[None, list]): The list of blocks to use for distilled resnet.
         hidden_layer_reduction (int): The number of hidden layers to remove for distilled llama.
     """
-    save_dir = "./results/rq2/" + linearity + "/" + relation_to + "/" + model + "/" + dataset + "/" + str(seed)
+    save_dir = "./results/rq2/" + linearity + "/" + compression_method + "/" + model + "/" + dataset + "/" + str(seed)
     os.makedirs(save_dir, exist_ok=True)
 
     # ------------------------------------------------------------
@@ -279,7 +51,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     # ------------------------------------------------------------
     if "resnet" in model:
         logger.info(
-            f"Running ResNet relation experiment with model={model}, linearity={linearity}, dataset={dataset}, relation_to={relation_to}, batch_size={batch_size}, epochs={epochs}, lr={lr}, data fraction: {data_fraction}, save={save}, seed={seed}, device={device}")
+            f"Running ResNet relation experiment with model={model}, linearity={linearity}, dataset={dataset}, relation_to={compression_method}, batch_size={batch_size}, epochs={epochs}, lr={lr}, data fraction: {data_fraction}, save={save}, seed={seed}, device={device}")
         data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, data_fraction=data_fraction,
                                    seed=seed)
         logger.debug(
@@ -290,11 +62,11 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
             # Save finetuned original
             torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_original.pth")
             logger.info(f"Saved finetuned original model to {save_dir}/{model}_original.pth")
-        elif save:
-            logger.info(f"Skipping saving finetuned model as it was loaded from disk. Loaded from {skip_finetune_path}.")
+    elif save:
+        logger.info(f"Skipping saving finetuned model as it was loaded from disk. Loaded from {skip_finetune_path}.")
     elif "llama" in model:
         logger.info(
-            f"Running Llama compression experiment with model: {model}, linearity metric: {linearity}, dataset: {dataset}, relation_to={relation_to}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, data fraction: {data_fraction}, save results: {save}, seed: {seed}, device: {device}")
+            f"Running Llama compression experiment with model: {model}, linearity metric: {linearity}, dataset: {dataset}, relation_to={compression_method}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, data fraction: {data_fraction}, save results: {save}, seed: {seed}, device: {device}")
         data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, data_fraction=data_fraction, model_name=model,
                                    seed=seed)
         logger.debug(
@@ -333,7 +105,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     # Compute pruning ratios or student model
     # --------------------------------------------------------------
     prune_dict, student_model = None, None
-    match relation_to:
+    match compression_method:
         case 'magnitude_pruning':
             from compression_methods.magnitude_pruning import prune
             prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(experimenter, data_handler, device=device,
@@ -378,7 +150,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     wandb_logging_data = {
         "model": model,
         "dataset": dataset,
-        "relation_to": relation_to,
+        "relation_to": compression_method,
         "linearity": linearity,
         "seed": seed,
         "linearity_scores": linearity_scores,

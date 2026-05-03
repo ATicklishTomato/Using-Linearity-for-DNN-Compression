@@ -1,5 +1,6 @@
 import argparse
-
+import json
+import glob
 import numpy as np
 import utils.util_functions as utils
 from experiments.relation import scatterplot_linearity_pruning_scores
@@ -52,9 +53,6 @@ def parse_args():
 
 def mean_rq1_results(path):
     # Read all *results.json files for 'accuracy_loss', 'param_compression_ratio', 'speedup', and 'tflop_reduction' and compute the mean for each metric
-    import json
-    import glob
-
     metrics = ['accuracy_loss', 'param_compression_ratio', 'speedup', 'gflop_reduction']
     results = {metric: [] for metric in metrics}
     files = glob.glob(path + '/**/*results.json', recursive=True)
@@ -75,8 +73,6 @@ def mean_rq1_results(path):
 
 def generate_latex_results_table(mean_results, args, path):
     """This function takes a dictionary of mean results, and generates a latex table. Gets stored in the results directory"""
-
-
 
     caption = (
         f"Results for {pretty_model_names[args.model]} trained on {pretty_dataset_names[args.dataset]} " +
@@ -112,8 +108,6 @@ def generate_latex_results_table(mean_results, args, path):
         f.write(table)
 
 def mean_benchmark_results(path, base_metrics_path="./results/rq1/mean_preactivation/75/resnet18/imagenet/**/*results.json"):
-    import json
-    import glob
     comp_metrics = ['comp_acc', 'comp_params', 'comp_infer', 'comp_gflops']
     base_metrics = ['original_accuracy', 'original_param_count', 'original_inference_time', 'original_gflops']
 
@@ -162,9 +156,6 @@ def mean_benchmark_results(path, base_metrics_path="./results/rq1/mean_preactiva
 
 
 def avg_rq2_scores(path):
-    import json
-    import glob
-
     linearity_scores = {}
     pruning_ratios = {}
     files = glob.glob(path + '/**/*.json', recursive=True)

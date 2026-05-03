@@ -1,3 +1,5 @@
+import glob
+import os
 import time
 import torch
 import torch.nn as nn
@@ -14,13 +16,14 @@ logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 class LlamaExperimenter:
-    def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, device='cuda'):
+    def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, device='cuda', skip_finetune_path = None):
         self.model_name = model_name
         self.data_handler = data_handler
         self.batch_size = batch_size
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.device = device
+        self.skip_finetune_path = skip_finetune_path
 
         match model_name:
             case "llama-2-7b":
@@ -34,7 +37,20 @@ class LlamaExperimenter:
             case _:
                 raise ValueError(f"Unsupported model: {model_name}.")
 
-        self.finetune()
+        if skip_finetune_path is not None:
+            try:
+                logger.info("Skip finetune path is set. Attempting to find finetuned model to load")
+                directories = glob.glob(self.skip_finetune_path, recursive=True) # Llama stores models in directories, not single files
+                directory = next((d for d in directories if os.path.isdir(d)), None) # Just grab the first matching directory
+                logger.info(f"Found save file {directory}, attempting to load")
+                self.model.from_pretrained(directory).to(self.device)
+                self.model.config.pad_token_id = self.data_handler.tokenizer.eos_token_id # Set pad token again to be safe
+                logger.info("Loaded finetuned model from file")
+            except Exception as e:
+                logger.info(f"Failed to load model due to {e}. Finetuning anyway")
+                self.finetune()
+        else:
+            self.finetune()
 
     def _initialize_llama_model(self, model_path):
         """Initialize a LLaMA model with the specified path."""
