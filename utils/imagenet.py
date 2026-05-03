@@ -1,17 +1,14 @@
-import numpy as np
+import torch
 from torch.utils.data import Subset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 
 
 def make_subset(dataset, fraction=0.1, seed=42):
-    np.random.seed(seed)
-    indices = np.random.choice(
-        len(dataset),
-        int(len(dataset) * fraction),
-        replace=False
-    )
+    torch.manual_seed(seed)
+    indices = torch.randperm(len(dataset))[:int(len(dataset) * fraction)]
     return Subset(dataset, indices)
+
 
 
 def load_datasets(reduction_fraction=0.1, seed=42):

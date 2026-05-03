@@ -21,4 +21,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m resnet34 -d cifar10 -e relation -l procrustes --relation basic_kd --epochs 20 --seed 1952 --save
+python main.py -m resnet34 -d cifar10 -e relation -l procrustes --relation basic_kd --epochs 20 --seed 1952 --save --skip_finetune

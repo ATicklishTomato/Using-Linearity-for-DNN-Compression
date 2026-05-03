@@ -21,4 +21,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m resnet50 -d imagenet -e relation --relation basic_kd --seed 762 --save
+python main.py -m resnet50 -d imagenet -e relation --relation basic_kd --seed 762 --save --skip_finetune

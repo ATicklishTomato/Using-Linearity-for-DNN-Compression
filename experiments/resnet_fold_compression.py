@@ -260,7 +260,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     experimenter = ResNetExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs,
                                       learning_rate=lr, device=device, skip_finetune_path=skip_finetune_path)
     logger.info("Model and data loaded, model fine-tuned.")
-    if save and skip_finetune_path is None:
+    if save and not experimenter.skipped:
         # Save finetuned original
         torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_original.pth")
         logger.info(f"Saved finetuned original model to {save_dir}/{model}_original.pth")

@@ -21,4 +21,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m resnet18 -d imagenet -e relation -l procrustes --relation basic_kd --seed 42 --save
+python main.py -m resnet18 -d imagenet -e relation -l procrustes --relation basic_kd --seed 42 --save --skip_finetune

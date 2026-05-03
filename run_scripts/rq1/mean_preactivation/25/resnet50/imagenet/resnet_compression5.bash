@@ -21,4 +21,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m resnet50 -d imagenet -e compression --threshold "25%" --seed 1952 --save
+python main.py -m resnet50 -d imagenet -e compression --threshold "25%" --seed 1952 --save --skip_finetune

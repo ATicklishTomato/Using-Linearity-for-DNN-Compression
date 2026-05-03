@@ -23,6 +23,7 @@ class ResNetExperimenter:
         self.learning_rate = learning_rate
         self.device = device
         self.skip_finetune_path = skip_finetune_path
+        self.skipped = False
 
         match model_name:
             case "resnet18":
@@ -36,13 +37,14 @@ class ResNetExperimenter:
 
         if skip_finetune_path is not None:
             try:
-                logger.info("Skip finetune path is set. Attempting to find finetuned model to load")
+                logger.info(f"Skip finetune path is set. Attempting to find finetuned model to load from {skip_finetune_path}")
                 path = str(glob.glob(self.skip_finetune_path, recursive=True)[0]) # We just take the first instance
                 logger.info(f"Found save path {path}, attempting to load")
                 self.model.load_state_dict(torch.load(path, weights_only=True))
                 logger.info("Loaded finetuned model from file")
+                self.skipped = True
             except Exception as e:
-                logger.info(f"Failed to load model due to {e}. Finetuning anyway")
+                logger.warning(f"Failed to load model due to {e}. Finetuning anyway")
                 self.finetune()
         else:
             self.finetune()

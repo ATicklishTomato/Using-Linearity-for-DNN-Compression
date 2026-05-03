@@ -23,4 +23,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m llama-3-1b -d tinystories -e relation -l fraction --relation basic_kd --seed 762 --save
+python main.py -m llama-3-1b -d tinystories --batch_size 4 -e relation -l fraction --relation basic_kd --seed 762 --save --skip_finetune

@@ -23,4 +23,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m llama-3-1b -d superglue -e relation --relation basic_kd --seed 42 --save
+python main.py -m llama-3-1b -d superglue --batch_size 4 -e relation --relation basic_kd --seed 42 --save --skip_finetune

@@ -196,6 +196,7 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
     if save_path is None:
         save_path = "./results"
 
+    replacements = []
     for layer_group in groups:
         logger.info(f"Training approximation for layer group: {layer_group}")
         linear_block = train_block_approximation(
@@ -207,7 +208,9 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
             epochs=epochs,
             lr=lr
         )
-        replace_attention_block(experimenter.model, layer_group, linear_block)
+        replacements.append((experimenter.model, layer_group, linear_block))
+    for replacement in replacements:
+        replace_attention_block(*replacement)
 
     if save_model:
         # Save the compressed model
@@ -247,7 +250,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     experimenter = LlamaExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs,
                                      learning_rate=lr, device=device, skip_finetune_path=skip_finetune_path)
     logger.info("Model initialized.")
-    if save and skip_finetune_path is None:
+    if save and not experimenter.skipped:
         # Save original finetuned model
         experimenter.model.save_pretrained(f"{save_dir}/original_{model}")
         logger.info(f"Original finetuned model saved to {save_dir}/original_{model}")

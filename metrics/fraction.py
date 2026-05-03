@@ -59,7 +59,7 @@ def fraction_of_activation(model, data_handler, device='cuda', save=False, save_
     all_outputs = {}
     logger.info("Registering hooks.")
     for name, module in model.named_modules():
-        if target_layer_pattern.match(name):
+        if target_layer_pattern.match(name) and "downsample" not in name:
             hooks.append(module.register_forward_hook(lambda module, input, output, name=name: hook_fn(output, linear_outputs, all_outputs, name)))
 
     logger.info("Hooks registered. Starting forward pass.")
@@ -68,11 +68,11 @@ def fraction_of_activation(model, data_handler, device='cuda', save=False, save_
         if is_resnet:
             data_loader = DataLoader(dataset, batch_size=data_handler.batch_size, shuffle=False, num_workers=0,
                                      pin_memory=True)
-            for inputs, _ in tqdm(data_loader, total=len(dataset), desc="Computing mean preactivations", leave=False, disable=debug_mode):
+            for inputs, _ in tqdm(data_loader, total=len(dataset), desc="Computing activation fraction", leave=False, disable=debug_mode):
                 inputs = inputs.to(device)
                 model(inputs)
         else:
-            for i in tqdm(range(len(dataset)), desc="Processing samples for preactivations", leave=False, disable=debug_mode):
+            for i in tqdm(range(len(dataset)), desc="Processing samples for activation fraction", leave=False, disable=debug_mode):
                 inputs = data_handler.tokenizer(dataset[i]['text'], return_tensors='pt', truncation=True, padding='max_length', max_length=512)
                 inputs = {k: v.to(device) for k, v in inputs.items()}
                 with torch.autocast("cuda", dtype=torch.bfloat16):

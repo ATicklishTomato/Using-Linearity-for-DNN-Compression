@@ -23,4 +23,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m llama-3-3b -d superglue -e compression --threshold "50%" --seed 1843 --save
+python main.py -m llama-3-3b -d superglue --batch_size 4 -e compression --threshold "50%" --seed 1843 --save --skip_finetune

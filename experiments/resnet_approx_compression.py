@@ -18,7 +18,7 @@ import utils.util_functions as utils
 logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
-def group_contiguous_layers(linear_layers, all_layers):
+def group_contiguous_layers(linear_layers, all_layers, model):
     """
     Groups contiguous layeri.j.convk where i is the layer index, j is the block index in the layer, and k is the conv layer index in the block.
     Returns a list of lists of layer indices.
@@ -28,25 +28,70 @@ def group_contiguous_layers(linear_layers, all_layers):
     Returns:
         list of lists: A list where each element is a list of contiguous layer indices that are linear.
     """
-    # get (i,j,k) tuples
+    # ------------------------------------------
+    # 1. Get sorted candidate layers
+    # ------------------------------------------
     indices = sorted(list(linear_layers.keys()))
     ground_truth = sorted(all_layers)
 
-    groups = []
+    # ------------------------------------------
+    # 2. Basic contiguous grouping (unchanged logic)
+    # ------------------------------------------
+    raw_groups = []
     current = [indices[0]]
 
     for prev, curr in zip(indices, indices[1:]):
-        prev_idx = ground_truth.index(prev)
-        curr_idx = ground_truth.index(curr)
-        if prev_idx + 1 == curr_idx:
+        if ground_truth.index(prev) + 1 == ground_truth.index(curr):
             current.append(curr)
         else:
-            groups.append(current)
+            raw_groups.append(current)
             current = [curr]
 
-    groups.append(current)
-    logger.debug(f"Grouped contiguous layers: {groups}")
-    return groups
+    raw_groups.append(current)
+
+    # ------------------------------------------
+    # 3. Infer conv structure per ResNet block
+    # ------------------------------------------
+    block_to_convs = {}
+
+    for name, module in model.named_modules():
+        # only care about conv layers inside blocks
+        if "conv" in name:
+            block = ".".join(name.split(".")[:2])  # e.g. layer2.0
+            block_to_convs.setdefault(block, set()).add(name)
+
+    # ------------------------------------------
+    # 4. Convert raw groups into block-valid groups
+    # ------------------------------------------
+    final_groups = []
+
+    for group in raw_groups:
+
+        # group by block
+        block_map = {}
+
+        for layer in group:
+            block = ".".join(layer.split(".")[:2])
+            block_map.setdefault(block, []).append(layer)
+
+        for block, layers in block_map.items():
+
+            expected_convs = block_to_convs.get(block, set())
+            covered_convs = set(layers)
+
+            # --------------------------------------------------
+            # ONLY GROUP if full block is covered
+            # --------------------------------------------------
+            if expected_convs and covered_convs == expected_convs:
+                final_groups.append(layers)
+            else:
+                # singleton behavior
+                for l in layers:
+                    final_groups.append([l])
+
+    logger.info(f"Found groups: {final_groups}")
+
+    return final_groups
 
 class LinearConvolutionalBlock(nn.Module):
     def __init__(self, in_shape, out_shape, kernel_size=3):
@@ -122,18 +167,18 @@ def replace_attention_block(model, layer_group, linear_block):
     Returns:
         None. Model is modified in place.
     """
-    first = layer_group[0] # e.g. layer1.0.conv1
-
-    # Replace the first layer in the group with the trained linear block
-    parts = first.split(".")
-    parent = reduce(getattr, parts[:-1], model)
-    setattr(parent, parts[-1], linear_block)
-
-    # Replace other parts with linear block
-    for layer in layer_group[1:]:
-        parts = layer.split(".")
+    if len(layer_group) == 1:
+        parts = layer_group[0].split(".")
         parent = reduce(getattr, parts[:-1], model)
-        setattr(parent, parts[-1], IdentityBlock()) # replace with identity since the first linear block should already capture the behavior of the group
+        logger.info(f"Replacing {'.'.join(parts)} with linear block")
+        setattr(parent, parts[-1], linear_block)
+    else:
+        # Replace the whole block
+        parts = layer_group[0].split(".")[:2]
+        parent = reduce(getattr, parts[:-1], model)
+        # replace entire block
+        logger.info(f"Replacing {'.'.join(parts)} with linear block")
+        setattr(parent, parts[-1], linear_block)
 
 def get_block_input_output(model, model_input, layer_group, device="cuda") -> Tuple[torch.Tensor, torch.Tensor]:
     """Gets the input and output of the specified convolutional layers for training the linear approximation.
@@ -213,7 +258,7 @@ def train_block_approximation(
         for i, data in tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training block {layer_group} Epoch {epoch+1}", leave=False, disable=debug_mode):
 
             inputs, _ = data
-            inputs= inputs.to(device)
+            inputs = inputs.to(device)
 
             x, y_teacher = get_block_input_output(model, inputs, layer_group, device=device)
 
@@ -244,6 +289,7 @@ def train_approximation_layers(experimenter, data_handler, groups,
     Returns:
         The compressed model with linear approximations.
     """
+    replacements = []
     for layer_group in groups:
         logger.info(f"Training approximation for layer group: {layer_group}")
         linear_block = train_block_approximation(
@@ -255,7 +301,9 @@ def train_approximation_layers(experimenter, data_handler, groups,
             lr=lr,
             batch_size=batch_size
         )
-        replace_attention_block(experimenter.model, layer_group, linear_block)
+        replacements.append((experimenter.model, layer_group, linear_block))
+    for replacement in replacements:
+        replace_attention_block(*replacement)
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
                    epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str,
@@ -288,7 +336,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     experimenter = ResNetExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs,
                                       learning_rate=lr, device=device, skip_finetune_path=skip_finetune_path)
     logger.info("Model and data loaded, model fine-tuned.")
-    if save and skip_finetune_path is None:
+    if save and not experimenter.skipped:
         # Save finetuned original
         torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_original.pth")
         logger.info(f"Saved finetuned original model to {save_dir}/{model}_original.pth")
@@ -317,7 +365,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # Group contiguous linear layers and create linear approximation layers
     # ------------------------------------------------------------
     all_layers = list(linear_layers.keys()) + list(nonlinear_layers.keys())
-    groups = group_contiguous_layers(linear_layers, all_layers)
+    groups = group_contiguous_layers(linear_layers, all_layers, experimenter.model)
     train_approximation_layers(experimenter, data_handler, groups, epochs=epochs, lr=lr,
                                batch_size=batch_size, device=device)
     logger.info("Linear approximation layers trained and integrated into the model.")

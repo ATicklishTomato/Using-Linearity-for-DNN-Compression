@@ -23,4 +23,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m llama-3-3b -d tinystories -e compression -l fraction --threshold "25%" --seed 1843 --save
+python main.py -m llama-3-3b -d tinystories --batch_size 4 -e compression -l fraction --threshold "25%" --seed 1843 --save --skip_finetune

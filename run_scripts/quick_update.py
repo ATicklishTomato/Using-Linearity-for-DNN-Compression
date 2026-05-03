@@ -1,8 +1,8 @@
 
 
-path = "./*/*/*/llama*/*/*.bash"
-target = "gpu_mig"
-replace = "gpu_a100"
+path = "./*/*/*/*/*/*.bash"
+target = "--save"
+replace = "--save --skip_finetune"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path

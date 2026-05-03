@@ -21,4 +21,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m resnet18 -d imagenet -e relation --relation magnitude_pruning --seed 1952 --save
+python main.py -m resnet18 -d imagenet -e relation --relation magnitude_pruning --seed 1952 --save --skip_finetune

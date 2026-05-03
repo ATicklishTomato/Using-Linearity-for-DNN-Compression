@@ -102,14 +102,13 @@ def resnet_map(model, mean_preactivations):
     """
     mapped_mean_preactivations = {}
     for name, module in model.named_modules():
-        if isinstance(module, torch.nn.BatchNorm2d):
-            if "downsample" not in name:
-                mean = mean_preactivations.get(name, 0.0)
-                layer = name.split('bn')[0]  # Get the layer name before .bn
-                index = name.split('bn')[-1]  # Get the index if present
-                mapped_mean_preactivations[layer + 'conv' + index] = mean  # Copy to preceding Conv2d layer
-            else:
-                mapped_mean_preactivations[name] = mean_preactivations.get(name, 0.0)  # Keep downsample layers as is
+        if isinstance(module, torch.nn.BatchNorm2d) and "downsample" not in name:
+            mean = mean_preactivations.get(name, 0.0)
+            layer = name.split('bn')[0]  # Get the layer name before .bn
+            index = name.split('bn')[-1]  # Get the index if present
+            mapped_mean_preactivations[layer + 'conv' + index] = mean  # Copy to preceding Conv2d layer
+        else:
+            logger.info(f"Skipping layer {name} for mapping since it's not a BatchNorm2d layer or is a downsample layer.")
     return mapped_mean_preactivations
 
 def mean_preactivations(model, data_handler, device='cuda', save=False, save_dir="./results"):
@@ -155,7 +154,7 @@ def mean_preactivations(model, data_handler, device='cuda', save=False, save_dir
         for name, module in tqdm(model.named_modules(),
                                  desc="Registering hooks",
                                  leave=False, disable=debug_mode):
-            if isinstance(module, torch.nn.BatchNorm2d):
+            if isinstance(module, torch.nn.BatchNorm2d) and "downsample" not in name:
                 hooks.append(module.register_forward_hook(lambda module, input, output, name=name: resnet_hook(module, input, output, channel_sums, sample_counts, name)))
 
     logger.debug("Hooks registered. Performing forward passes...")

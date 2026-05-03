@@ -286,7 +286,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
             f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
         experimenter = ResNetExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size, epochs=epochs,
                                           learning_rate=lr, device=device, skip_finetune_path=skip_finetune_path)
-        if save and skip_finetune_path is None:
+        if save and not experimenter.skipped:
             # Save finetuned original
             torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_original.pth")
             logger.info(f"Saved finetuned original model to {save_dir}/{model}_original.pth")
@@ -301,7 +301,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
             f"Dataset loaded with {len(data_handler.train_set)} training samples and {len(data_handler.val_set)} validation samples.")
         experimenter = LlamaExperimenter(model_name=model, data_handler=data_handler, batch_size=batch_size,
                                          epochs=epochs, learning_rate=lr, device=device, skip_finetune_path=skip_finetune_path)
-        if save and skip_finetune_path is None:
+        if save and not experimenter.skipped:
             experimenter.model.save_pretrained(f"{save_dir}/original_{model}")
             logger.info(f"Original finetuned model saved to {save_dir}/original_{model}")
         elif save:

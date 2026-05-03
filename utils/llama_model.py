@@ -24,6 +24,7 @@ class LlamaExperimenter:
         self.learning_rate = learning_rate
         self.device = device
         self.skip_finetune_path = skip_finetune_path
+        self.skipped = False
 
         match model_name:
             case "llama-2-7b":
@@ -39,15 +40,16 @@ class LlamaExperimenter:
 
         if skip_finetune_path is not None:
             try:
-                logger.info("Skip finetune path is set. Attempting to find finetuned model to load")
+                logger.info(f"Skip finetune path is set. Attempting to find finetuned model to load from {skip_finetune_path}")
                 directories = glob.glob(self.skip_finetune_path, recursive=True) # Llama stores models in directories, not single files
-                directory = next((d for d in directories if os.path.isdir(d)), None) # Just grab the first matching directory
+                directory = str(next((d for d in directories if os.path.isdir(d)), None)) # Just grab the first matching directory
                 logger.info(f"Found save file {directory}, attempting to load")
                 self.model.from_pretrained(directory).to(self.device)
                 self.model.config.pad_token_id = self.data_handler.tokenizer.eos_token_id # Set pad token again to be safe
                 logger.info("Loaded finetuned model from file")
+                self.skipped = True
             except Exception as e:
-                logger.info(f"Failed to load model due to {e}. Finetuning anyway")
+                logger.warning(f"Failed to load model due to {e}. Finetuning anyway")
                 self.finetune()
         else:
             self.finetune()

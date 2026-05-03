@@ -21,4 +21,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m resnet34 -d cifar10 -e compression --threshold "25%" --epochs 20 --seed 762 --save
+python main.py -m resnet34 -d cifar10 -e compression --threshold "25%" --epochs 20 --seed 762 --save --skip_finetune
