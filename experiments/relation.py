@@ -361,6 +361,8 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     # Generate either scatterplot or similarity matrix
     # --------------------------------------------------------------
     matrix = None
+    teacher_layer_names = None
+    student_layer_names = None
     if prune_dict is not None:
         scatterplot_linearity_pruning_scores(linearity_scores, prune_dict, save_dir)
         logger.info("Saved linearity vs pruning scatterplot.")
@@ -419,6 +421,8 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
 
             # Store cka matrix
             np.save(f"{save_dir}/cka_similarity_matrix.npy", matrix)
+            json.dump(teacher_layer_names, open(f"{save_dir}/teacher_layer_names.json", "w"), indent=4)
+            json.dump(student_layer_names, open(f"{save_dir}/student_layer_names.json", "w"), indent=4)
             logger.info(f"Saved CKA similarity matrix to {save_dir}/cka_similarity_matrix.npy")
 
     if prune_dict is not None:

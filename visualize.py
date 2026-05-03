@@ -155,7 +155,7 @@ def mean_benchmark_results(path, base_metrics_path="./results/rq1/mean_preactiva
     }
 
 
-def avg_rq2_scores(path):
+def avg_rq2_prune_scores(path):
     linearity_scores = {}
     pruning_ratios = {}
     files = glob.glob(path + '/**/*.json', recursive=True)
@@ -187,7 +187,6 @@ def avg_rq2_scores(path):
 
     return avg_linearity_scores, avg_pruning_ratios
 
-
 if __name__ == '__main__':
     args = parse_args()
     print(f"Aggregating results for RQ: {args.rq}, Threshold: {args.threshold}, Model: {args.model}, Dataset: {args.dataset}, Relation: {args.relation_to}" +
@@ -212,7 +211,7 @@ if __name__ == '__main__':
         case 'rq2':
             if args.relation_to == 'magnitude_pruning':
                 # Compute average scatterplot
-                avg_linearity_scores, avg_pruning_ratios = avg_rq2_scores(path)
+                avg_linearity_scores, avg_pruning_ratios = avg_rq2_prune_scores(path)
                 print("Average Linearity Scores:", avg_linearity_scores)
                 print("Average Pruning Ratios:", avg_pruning_ratios)
                 scatterplot_linearity_pruning_scores(avg_linearity_scores, avg_pruning_ratios, path)

@@ -129,7 +129,14 @@ if __name__ == '__main__':
         logger.warning("No Weights and Biases API key provided.")
 
     if os.path.exists('hf.login'):
-        login(token=open("hf.login").read().strip())
+        try:
+            login(token=open("hf.login", 'r').read().strip())
+        except Exception as e:
+            logger.warning("HF login failed. Please check your login credentials.")
+            if "resnet" in args.model:
+                logger.warning("HF login not required. Continuing without HuggingFace API key.")
+            else:
+                logger.error("HF login failed and required. This experiment will probably fail.")
     else:
         logger.warning("No HuggingFace API key provided.")
 
