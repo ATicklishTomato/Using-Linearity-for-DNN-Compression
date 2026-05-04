@@ -1,8 +1,8 @@
 
 
 path = "./*/*/*/*/*/*.bash"
-target = "--cpus-per-task=1"
-replace = "--cpus-per-task=5"
+target = "--mem=8G"
+replace = "--mem=16G"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path
