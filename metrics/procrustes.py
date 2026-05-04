@@ -164,23 +164,24 @@ def expand_scores_to_individual_layers(scores, is_resnet):
 # Hook logic
 # ============================================================
 
-def pre_hook_fn(module, inputs, storage, name):
+def hook_fn(module, inputs, output, storage, name):
     """
-    Save input to block.
+    Save input and output from block.
     """
     x = inputs[0].detach()
-    storage[name]["x"].append(x.cpu())
+    if len(storage[name]["x"]) == 0:
+        storage[name]["x"] = x.cpu()
+    else:
+        storage[name]["x"] = torch.cat([storage[name]["x"], x.cpu()], dim=0)
 
-
-def post_hook_fn(module, inputs, output, storage, name):
-    """
-    Save output from block.
-    """
     if isinstance(output, tuple):
         output = output[0]
 
     y = output.detach()
-    storage[name]["y"].append(y.cpu())
+    if len(storage[name]["y"]) == 0:
+        storage[name]["y"] = y.cpu()
+    else:
+        storage[name]["y"] = torch.cat([storage[name]["y"], y.cpu()], dim=0)
 
 
 # ============================================================
@@ -233,16 +234,9 @@ def procrustes_based_linearity(
     for name, module in model.named_modules():
         if target_layer_pattern.match(name):
             hooks.append(
-                module.register_forward_pre_hook(
-                    lambda module, inputs, name=name:
-                    pre_hook_fn(module, inputs, storage, name)
-                )
-            )
-
-            hooks.append(
                 module.register_forward_hook(
                     lambda module, inputs, output, name=name:
-                    post_hook_fn(module, inputs, output, storage, name)
+                    hook_fn(module, inputs, output, storage, name)
                 )
             )
 
@@ -264,12 +258,17 @@ def procrustes_based_linearity(
                 persistent_workers=True     # avoids worker restart each epoch
             )
 
-            for inputs, _ in tqdm(
-                loader,
+            for index, batch in tqdm(
+                enumerate(loader),
+                total=1000//data_handler.batch_size,  # We only process 1000 samples to avoid overkill
                 desc="ResNet forward pass",
                 leave=False,
                 disable=debug_mode,
             ):
+                if index >= 1000//data_handler.batch_size:
+                    # We stop after 1000 samples, as concatenating embeddings for the whole dataset is overkill
+                    break
+                inputs, _ = batch
                 inputs = inputs.to(device)
                 model(inputs)
 
@@ -280,13 +279,16 @@ def procrustes_based_linearity(
                 shuffle=False,
                 num_workers=4, pin_memory=True, prefetch_factor=2, persistent_workers=True
             )
-            for batch in tqdm(
-                data_loader,
-                total=len(data_loader),
+            for index, batch in tqdm(
+                enumerate(data_loader),
+                total=1000//data_handler.batch_size,
                 desc="LLaMA forward pass",
                 leave=False,
                 disable=debug_mode,
             ):
+                if index >= 1000//data_handler.batch_size:
+                    # We stop after 100 batches, as concatenating embeddings for the whole dataset is overkill
+                    break
                 tokens = data_handler.tokenizer(
                     batch["text"],
                     return_tensors="pt",
@@ -317,8 +319,8 @@ def procrustes_based_linearity(
         if len(storage[name]["x"]) == 0:
             continue
 
-        X = torch.cat(storage[name]["x"], dim=0)
-        Y = torch.cat(storage[name]["y"], dim=0)
+        X = storage[name]["x"]
+        Y = storage[name]["y"]
 
         # Match feature dims if needed
         d = min(X.shape[1], Y.shape[1])
