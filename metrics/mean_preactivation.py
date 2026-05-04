@@ -162,13 +162,24 @@ def mean_preactivations(model, data_handler, device='cuda', save=False, save_dir
     # Forward pass through the data
     with torch.no_grad():
         if "llama" in save_path.lower():
-            for i in tqdm(range(len(dataset)), desc="Processing samples for preactivations", leave=False, disable=debug_mode):
-                inputs = data_handler.tokenizer(dataset[i]['text'], return_tensors='pt', truncation=True, padding='max_length', max_length=512)
+            data_loader = DataLoader(dataset, batch_size=data_handler.batch_size, shuffle=True,
+                                  num_workers=4,              # try 2–8 depending on CPU
+                                  pin_memory=True,            # important for GPU transfer
+                                  prefetch_factor=2,          # batches per worker
+                                  persistent_workers=True     # avoids worker restart each epoch
+                                  )
+            for batch in tqdm(data_loader, total=len(data_loader), desc="Processing samples for preactivations", leave=False, disable=debug_mode):
+                inputs = data_handler.tokenizer(batch['text'], return_tensors='pt', truncation=True, padding='max_length', max_length=512)
                 inputs = {k: v.to(device) for k, v in inputs.items()}
                 with torch.autocast("cuda", dtype=torch.bfloat16):
                     model(**inputs)
         else:
-            data_loader = DataLoader(dataset, batch_size=data_handler.batch_size, shuffle=False, num_workers=0, pin_memory=True)
+            data_loader = DataLoader(dataset, batch_size=data_handler.batch_size, shuffle=False,
+                                  num_workers=4,              # try 2–8 depending on CPU
+                                  pin_memory=True,            # important for GPU transfer
+                                  prefetch_factor=2,          # batches per worker
+                                  persistent_workers=True     # avoids worker restart each epoch
+                                  )
             for inputs, _ in tqdm(data_loader, total=len(dataset), desc="Computing mean preactivations", leave=False, disable=debug_mode):
                 inputs = inputs.to(device)
                 model(inputs)

@@ -7,7 +7,7 @@
 #SBATCH --time=08:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=5
 #SBATCH --mem=16G
 
 # Only load python because PyTorch module is garbage on this cluster

@@ -70,7 +70,12 @@ class ResNetExperimenter:
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
 
-        train_loader = DataLoader(self.data_handler.train_set, batch_size=self.batch_size, shuffle=True)
+        train_loader = DataLoader(self.data_handler.train_set, batch_size=self.batch_size, shuffle=True,
+                                  num_workers=4,              # try 2–8 depending on CPU
+                                  pin_memory=True,            # important for GPU transfer
+                                  prefetch_factor=2,          # batches per worker
+                                  persistent_workers=True     # avoids worker restart each epoch
+                                  )
 
         self.model.train()
         for epoch in range(self.epochs):
@@ -109,7 +114,12 @@ class ResNetExperimenter:
         correct = 0
         total = 0
         inference_time = 0
-        data_loader = DataLoader(self.data_handler.val_set, batch_size=self.batch_size, shuffle=False)
+        data_loader = DataLoader(self.data_handler.val_set, batch_size=self.batch_size, shuffle=False,
+                                  num_workers=4,              # try 2–8 depending on CPU
+                                  pin_memory=True,            # important for GPU transfer
+                                  prefetch_factor=2,          # batches per worker
+                                  persistent_workers=True     # avoids worker restart each epoch
+                                  )
         with torch.no_grad():
             for inputs, labels in tqdm(data_loader, total=len(data_loader), desc="Validating ResNet model", leave=False, disable=debug_mode):
                 inputs = inputs.to(self.device)

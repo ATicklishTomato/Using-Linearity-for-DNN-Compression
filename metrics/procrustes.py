@@ -258,8 +258,10 @@ def procrustes_based_linearity(
                 dataset,
                 batch_size=data_handler.batch_size,
                 shuffle=False,
-                num_workers=0,
-                pin_memory=True,
+                num_workers=4,              # try 2–8 depending on CPU
+                pin_memory=True,            # important for GPU transfer
+                prefetch_factor=2,          # batches per worker
+                persistent_workers=True     # avoids worker restart each epoch
             )
 
             for inputs, _ in tqdm(
@@ -272,14 +274,21 @@ def procrustes_based_linearity(
                 model(inputs)
 
         else:
-            for i in tqdm(
-                range(len(dataset)),
+            data_loader = DataLoader(
+                dataset,
+                batch_size=data_handler.batch_size,
+                shuffle=False,
+                num_workers=4, pin_memory=True, prefetch_factor=2, persistent_workers=True
+            )
+            for batch in tqdm(
+                data_loader,
+                total=len(data_loader),
                 desc="LLaMA forward pass",
                 leave=False,
                 disable=debug_mode,
             ):
                 tokens = data_handler.tokenizer(
-                    dataset[i]["text"],
+                    batch["text"],
                     return_tensors="pt",
                     truncation=True,
                     padding="max_length",

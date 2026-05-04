@@ -1,8 +1,8 @@
 
 
 path = "./*/*/*/*/*/*.bash"
-target = "--save"
-replace = "--save --skip_finetune"
+target = "--cpus-per-task=1"
+replace = "--cpus-per-task=5"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path

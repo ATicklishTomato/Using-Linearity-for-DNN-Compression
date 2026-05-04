@@ -3,6 +3,7 @@ from typing import Tuple, Optional
 import numpy as np
 import torch
 import wandb
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 import os
 import logging
@@ -97,7 +98,7 @@ def get_block_input_output(model, model_inputs, layer_group, device="cuda") -> T
 
     def output_hook(module, input, output):
         nonlocal group_output
-        group_output = output[0].detach()
+        group_output = output.detach()
 
     hooks = [model.model.layers[layer_group[0]].register_forward_hook(input_hook),
              model.model.layers[layer_group[-1]].register_forward_hook(output_hook)]
@@ -114,9 +115,8 @@ def get_block_input_output(model, model_inputs, layer_group, device="cuda") -> T
 
 def train_block_approximation(
     model,
-    tokenizer,
     layer_group,
-    train_dataset,
+    data_handler,
     device,
     epochs=1,
     lr=2e-4
@@ -125,9 +125,8 @@ def train_block_approximation(
     Trains a linear approximation layer to mimic a section of a LLama model's attention blocks.
     Args:
         model: The LLaMA model to modify.
-        tokenizer: The tokenizer to use for tokenization.
         layer_group: A list of layer indices that form a contiguous block to replace.
-        train_dataset: The training dataset.
+        data_handler: The DataManager instance containing the dataset and its tokenizer.
         device: The device to use.
         epochs: The number of epochs to train.
         lr: The learning rate to use.
@@ -140,14 +139,20 @@ def train_block_approximation(
     optimizer = torch.optim.AdamW(approx.parameters(), lr=lr)
     loss_fn = torch.nn.MSELoss()
     scaler = torch.amp.GradScaler(device)
+    train_loader = DataLoader(data_handler.train_set, batch_size=data_handler.batch_size, shuffle=True,
+                              num_workers=4,  # try 2–8 depending on CPU
+                              pin_memory=True,  # important for GPU transfer
+                              prefetch_factor=2,  # batches per worker
+                              persistent_workers=True  # avoids worker restart each epoch
+                              )
 
     model.eval().to(device)
     approx.train().to(device)
 
     for epoch in range(epochs):
-        for i, batch in tqdm(enumerate(train_dataset), total=len(train_dataset), desc=f"Training block {layer_group} Epoch {epoch+1}", leave=False, disable=debug_mode):
+        for i, batch in tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training block {layer_group} Epoch {epoch+1}", leave=False, disable=debug_mode):
 
-            inputs = tokenizer(
+            inputs = data_handler.tokenizer(
                 batch["text"],
                 return_tensors="pt",
                 padding=True,
@@ -162,7 +167,7 @@ def train_block_approximation(
                 y_student = approx(x)
                 logger.debug(f"y_student shape: {y_student.shape}, y_teacher shape: {y_teacher.shape}")
                 logger.debug(f"y_student NaN: {torch.any(torch.isnan(y_student))}, y_teacher NaN: {torch.any(torch.isnan(y_teacher))}")
-                loss = loss_fn(y_student, y_teacher.unsqueeze(0))
+                loss = loss_fn(y_student, y_teacher)
 
             optimizer.zero_grad()
 
@@ -201,9 +206,8 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
         logger.info(f"Training approximation for layer group: {layer_group}")
         linear_block = train_block_approximation(
             experimenter.model,
-            data_handler.tokenizer,
             layer_group,
-            data_handler.train_set,
+            data_handler,
             device,
             epochs=epochs,
             lr=lr

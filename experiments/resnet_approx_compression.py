@@ -236,7 +236,12 @@ def train_block_approximation(
     Returns:
         The linear approximation layer trained to mimic the specified attention block layers.
     """
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                              num_workers=4,              # try 2–8 depending on CPU
+                              pin_memory=True,            # important for GPU transfer
+                              prefetch_factor=2,          # batches per worker
+                              persistent_workers=True     # avoids worker restart each epoch
+                              )
     model.eval().to(device)
 
     # Get input size of first layer in group and output of last layer in group
@@ -324,7 +329,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         skip_finetune_path (str): The path to look for a finetuned model saved to disk if skipping is enabled.
         sweep (bool): Flag that indicates whether an additional metric should be computed to use for a W&B sweep.
     """
-    save_dir = "./results/rq1/" + linearity + "/" + threshold.split(".")[-1].split("%")[0] + "/" + model + "/" + dataset + "/" + str(seed)
+    save_dir = "./results/rq1/approx/" + linearity + "/" + threshold.split(".")[-1].split("%")[0] + "/" + model + "/" + dataset + "/" + str(seed)
     os.makedirs(save_dir, exist_ok=True)
 
     # ------------------------------------------------------------

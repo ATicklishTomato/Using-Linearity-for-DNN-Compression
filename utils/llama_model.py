@@ -70,7 +70,12 @@ class LlamaExperimenter:
 
         optimizer = optim.AdamW(self.model.parameters(), lr=self.learning_rate)
 
-        train_loader = DataLoader(self.data_handler.train_set, batch_size=self.batch_size, shuffle=True)
+        train_loader = DataLoader(self.data_handler.train_set, batch_size=self.batch_size, shuffle=True,
+                                  num_workers=4,              # try 2–8 depending on CPU
+                                  pin_memory=True,            # important for GPU transfer
+                                  prefetch_factor=2,          # batches per worker
+                                  persistent_workers=True     # avoids worker restart each epoch
+                                  )
         for epoch in range(self.epochs):
             epoch_loss = 0.0
             batch_idx = 0
@@ -113,7 +118,12 @@ class LlamaExperimenter:
         inference_time = 0
         top_k_correct = 0
         total = 0
-        val_loader = DataLoader(self.data_handler.val_set, batch_size=self.batch_size, shuffle=False)
+        val_loader = DataLoader(self.data_handler.val_set, batch_size=self.batch_size, shuffle=False,
+                                  num_workers=4,              # try 2–8 depending on CPU
+                                  pin_memory=True,            # important for GPU transfer
+                                  prefetch_factor=2,          # batches per worker
+                                  persistent_workers=True     # avoids worker restart each epoch
+                                  )
         with torch.no_grad():
             for batch_idx, batch in enumerate(tqdm(val_loader, total=len(val_loader), desc="Validating LLaMA model", leave=False, disable=debug_mode)):
                 inputs = self.data_handler.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(self.device)

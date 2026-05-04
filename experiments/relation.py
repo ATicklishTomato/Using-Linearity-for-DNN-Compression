@@ -367,7 +367,12 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         scatterplot_linearity_pruning_scores(linearity_scores, prune_dict, save_dir)
         logger.info("Saved linearity vs pruning scatterplot.")
     if student_model is not None:
-        data_loader = DataLoader(data_handler.val_set, batch_size=batch_size, shuffle=False)
+        data_loader = DataLoader(data_handler.val_set, batch_size=batch_size, shuffle=False,
+                                  num_workers=4,              # try 2–8 depending on CPU
+                                  pin_memory=True,            # important for GPU transfer
+                                  prefetch_factor=2,          # batches per worker
+                                  persistent_workers=True     # avoids worker restart each epoch
+                                  )
         matrix, teacher_layer_names, student_layer_names = cka_similarity_matrix(experimenter.model, student_model,
                                                                                 data_loader, device=device,
                                                                                 tokenizer=data_handler.tokenizer if "llama" in model else None)

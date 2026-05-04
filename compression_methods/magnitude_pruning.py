@@ -229,7 +229,12 @@ def finetune_resnet(model, data_handler, lr=2e-5, batch_size=64, epochs=10, devi
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    train_loader = DataLoader(data_handler.train_set, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(data_handler.train_set, batch_size=batch_size, shuffle=True,
+                                  num_workers=4,              # try 2–8 depending on CPU
+                                  pin_memory=True,            # important for GPU transfer
+                                  prefetch_factor=2,          # batches per worker
+                                  persistent_workers=True     # avoids worker restart each epoch
+                                  )
 
     model.to(device).train()
     for epoch in range(epochs):
@@ -272,7 +277,12 @@ def evaluate_resnet(model, data_handler, device='cuda'):
         correct = 0
         total = 0
         inference_time = 0
-        data_loader = DataLoader(data_handler.val_set, batch_size=data_handler.batch_size, shuffle=False)
+        data_loader = DataLoader(data_handler.val_set, batch_size=data_handler.batch_size, shuffle=False,
+                                  num_workers=4,              # try 2–8 depending on CPU
+                                  pin_memory=True,            # important for GPU transfer
+                                  prefetch_factor=2,          # batches per worker
+                                  persistent_workers=True     # avoids worker restart each epoch
+                                  )
         with torch.no_grad():
             for inputs, labels in tqdm(data_loader, total=len(data_loader), desc="Validating ResNet model", leave=False, disable=debug_mode):
                 inputs = inputs.to(device)
@@ -455,7 +465,12 @@ def finetune_llama(model, data_handler, lr=2e-5, batch_size=4, epochs=10, device
 
     optimizer = optim.AdamW(model.parameters(), lr=lr)
 
-    train_loader = DataLoader(data_handler.train_set, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(data_handler.train_set, batch_size=batch_size, shuffle=True,
+                                  num_workers=4,              # try 2–8 depending on CPU
+                                  pin_memory=True,            # important for GPU transfer
+                                  prefetch_factor=2,          # batches per worker
+                                  persistent_workers=True     # avoids worker restart each epoch
+                                  )
     for epoch in range(epochs):
         epoch_loss = 0.0
         batch_idx = 0
@@ -505,7 +520,12 @@ def evaluate_llama(model, data_handler, device='cuda', top_k=5):
     inference_time = 0
     top_k_correct = 0
     total = 0
-    val_loader = DataLoader(data_handler.val_set, batch_size=data_handler.batch_size, shuffle=False)
+    val_loader = DataLoader(data_handler.val_set, batch_size=data_handler.batch_size, shuffle=False,
+                                  num_workers=4,              # try 2–8 depending on CPU
+                                  pin_memory=True,            # important for GPU transfer
+                                  prefetch_factor=2,          # batches per worker
+                                  persistent_workers=True     # avoids worker restart each epoch
+                                  )
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(val_loader, total=len(val_loader), desc="Validating LLaMA model", leave=False, disable=debug_mode)):
             inputs = data_handler.tokenizer(batch['text'], return_tensors='pt', padding=True, truncation=True).to(device)
