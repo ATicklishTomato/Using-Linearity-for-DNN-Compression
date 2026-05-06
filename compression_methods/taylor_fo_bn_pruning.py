@@ -119,15 +119,20 @@ from __future__ import annotations
 import logging
 import math
 import random
+import time
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.utils.data import DataLoader
+from torch_pruning.utils import count_ops_and_params
+from tqdm import tqdm
 
 from utils.data_manager import DataManager
 
 logger = logging.getLogger(__name__)
+debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -218,39 +223,38 @@ def _register_hooks(
     triplets   : List[_Triplet],
     hook_states: Dict[str, _HookState],
 ) -> List[torch.utils.hooks.RemovableHandle]:
-    """
-    Register one forward hook and one backward hook on each target BN module.
-    Activations are averaged over (batch, H, W) to get a C-dim vector.
-    """
+
     handles: List[torch.utils.hooks.RemovableHandle] = []
 
     for _, _, (bn_key, bn_module), _ in triplets:
         state = hook_states[bn_key]
 
-        # --- forward hook: store mean |activation| per channel ---
         def make_fwd(s):
             def fwd_hook(module, inp, out):
-                # out: (N, C, H, W)  or  (N, C)
-                if out.dim() == 4:
-                    s.act = out.detach()          # keep spatial dims; reduce later
+                # Normalize shape
+                if out.dim() == 2:
+                    out_ = out.unsqueeze(-1).unsqueeze(-1)
                 else:
-                    s.act = out.detach().unsqueeze(-1).unsqueeze(-1)
+                    out_ = out
+
+                # Store activation safely
+                s.act = out_.detach().clone()
+
+                # ✅ Attach gradient hook directly to tensor
+                def grad_hook(g):
+                    if g is None:
+                        return
+                    if g.dim() == 2:
+                        g_ = g.unsqueeze(-1).unsqueeze(-1)
+                    else:
+                        g_ = g
+                    s.grad = g_.detach().clone()
+
+                out_.register_hook(grad_hook)
+
             return fwd_hook
 
-        # --- backward hook: store mean |gradient| per channel ---
-        def make_bwd(s):
-            def bwd_hook(module, grad_in, grad_out):
-                g = grad_out[0]
-                if g is None:
-                    return
-                if g.dim() == 4:
-                    s.grad = g.detach()
-                else:
-                    s.grad = g.detach().unsqueeze(-1).unsqueeze(-1)
-            return bwd_hook
-
         handles.append(bn_module.register_forward_hook(make_fwd(state)))
-        handles.append(bn_module.register_full_backward_hook(make_bwd(state)))
 
     return handles
 
@@ -509,7 +513,7 @@ def prune(
     min_channels_per_layer     : int   = 8,
     seed                       : int   = 0,
     verbose                    : bool  = True,
-) -> Dict:
+) -> Tuple[Dict[str, float], float, int, float, float]:
     """
     Run Taylor-FO-BN pruning on a ResNet model.  See module docstring for full
     parameter and return-value documentation.
@@ -578,7 +582,13 @@ def prune(
 
     # ── main gradient-accumulation / prune loop ───────────────────────────────
     try:
-        for inputs, targets in data_handler.train_set:
+        train_loader = DataLoader(data_handler.train_set, batch_size=data_handler.batch_size, shuffle=True,
+                                  num_workers=4,  # try 2–8 depending on CPU
+                                  pin_memory=True,  # important for GPU transfer
+                                  prefetch_factor=2,  # batches per worker
+                                  persistent_workers=True  # avoids worker restart each epoch
+                                  )
+        for inputs, targets in train_loader:
             # ── stop if budget exhausted ─────────────────────────────────────
             if total_pruned >= prune_neurons_max:
                 break
@@ -658,14 +668,43 @@ def prune(
     if verbose:
         logger.info(final_msg)
 
-    return {
-        "model"                 : model,
-        "layer_pruning_ratios"  : layer_pruning_ratios,
-        "summary"               : summary,
-        "total_channels_before" : total_before_check,
-        "total_channels_after"  : total_after,
-        "global_pruning_ratio"  : global_ratio,
-    }
+    model = model.to(device).eval()
+    correct = 0
+    total = 0
+    inference_time = 0
+    data_loader = DataLoader(data_handler.val_set, batch_size=data_handler.batch_size, shuffle=False,
+                             num_workers=4,  # try 2–8 depending on CPU
+                             pin_memory=True,  # important for GPU transfer
+                             prefetch_factor=2,  # batches per worker
+                             persistent_workers=True  # avoids worker restart each epoch
+                             )
+    with torch.no_grad():
+        for inputs, labels in tqdm(data_loader, total=len(data_loader), desc="Validating ResNet model", leave=False,
+                                   disable=debug_mode):
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+
+            start = time.time()
+            outputs = model(inputs)
+            end = time.time()
+            _, predicted = torch.max(outputs, 1)
+
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+            inference_time += (end - start)
+
+    accuracy = correct / total
+
+    param_count = sum(p.numel() for p in model.parameters())
+    inference_time /= total
+
+    # Compute one more input for TFLOPs computation
+    with torch.no_grad():
+        example_input = next(iter(data_loader))
+        macs, _ = count_ops_and_params(model, example_input[0].to(device))
+    gflops = 2 * macs / 1e9  # Convert to GFLOPs
+
+    return layer_pruning_ratios, accuracy, param_count, inference_time, gflops
 
 
 # ─────────────────────────────────────────────────────────────────────────────

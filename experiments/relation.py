@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import wandb
 import matplotlib
+from torch import nn
 
 matplotlib.use("Agg") # Avoid errors when running without UI
 from matplotlib import pyplot as plt
@@ -19,6 +20,8 @@ from utils.resnet_model import ResNetExperimenter
 import utils.util_functions as utils
 
 logger = logging.getLogger(__name__)
+debug_mode = logger.getEffectiveLevel() != logging.DEBUG
+
 
 def _get_target_layers(model):
     if "resnet" in model.__class__.__name__.lower():
@@ -336,17 +339,34 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     match relation_to:
         case 'magnitude_pruning':
             from compression_methods.magnitude_pruning import prune
-            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(experimenter, data_handler, device=device,
-                                                                          pruning_ratio=pruning_ratio, lr=lr,
-                                                          batch_size=batch_size, epochs=epochs)
+            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
+                experimenter, data_handler, device=device,
+                pruning_ratio=pruning_ratio, lr=lr,
+                batch_size=batch_size, epochs=epochs)
+        case 'hessian_pruning':
+            from compression_methods.hessian_pruning import prune
+            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
+                experimenter, data_handler, device=device,
+                pruning_ratio=pruning_ratio, lr=lr,
+                batch_size=batch_size, epochs=epochs)
+        case 'taylor_pruning':
+            from compression_methods.taylor_pruning import prune
+            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
+                experimenter, data_handler, device=device,
+                pruning_ratio=pruning_ratio, lr=lr,
+                batch_size=batch_size, epochs=epochs)
         case 'basic_kd':
             from compression_methods.basic_kd import distill
             if blocks is None:
-                blocks = [1,1,2,2]
-            student_model, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = distill(experimenter, data_handler,device=device,
-                                                                                   lr=lr, epochs=epochs, blocks=blocks,
-                                                                                   hidden_layer_reduction=hidden_layer_reduction)
+                blocks = [1, 1, 2, 2]
 
+            student_model, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = distill(
+                experimenter, data_handler, device=device,
+                lr=lr, epochs=epochs, blocks=blocks,
+                hidden_layer_reduction=hidden_layer_reduction)
+
+    logger.info(f"Compressed model evaluated with accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, "
+                f"inference time: {compressed_inference_time:.4f} seconds, gflops: {compressed_gflops}")
     # ------------------------------------------------------------
     # Evaluate compressed model performance
     # ------------------------------------------------------------

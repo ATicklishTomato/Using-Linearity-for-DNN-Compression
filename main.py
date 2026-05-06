@@ -38,7 +38,7 @@ def parse_args():
                              '"linear_approximator_compression" tests linear approximation for ResNets. ' +
                              '"benchmark_compression" runs other compression methods to allow a comparison.')
     parser.add_argument('--relation', type=str,
-                        choices=['magnitude_pruning', 'basic_kd'],
+                        choices=['magnitude_pruning', 'basic_kd', 'hessian_pruning', 'taylor_pruning'],
                         default='magnitude_pruning',
                         help='The relation experiment to run. Only applicable if experiment type is "relation". Ignored otherwise.')
     parser.add_argument('-t', '--threshold', type=str,
@@ -55,7 +55,7 @@ def parse_args():
     parser.add_argument('--data_fraction', type=float, default=None,
                         help='Fraction of data to use for training and evaluation. If None, default fractions are:'
                              '- imagenet: 0.1'
-                             '- tinystories: 0.1'
+                             '- tinystories: 0.001'
                              '- cifar10: 1.0'
                              '- superglue: 0.1')
     parser.add_argument('--seed', type=int, default=42,
@@ -86,7 +86,7 @@ if __name__ == '__main__':
         if args.dataset == 'imagenet':
             args.data_fraction = 0.1
         elif args.dataset == 'tinystories':
-            args.data_fraction = 0.01
+            args.data_fraction = 0.001
         elif args.dataset == 'cifar10':
             args.data_fraction = 1.0
         elif args.dataset == 'superglue':
