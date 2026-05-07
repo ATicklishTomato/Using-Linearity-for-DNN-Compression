@@ -357,8 +357,12 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
                 batch_size=batch_size, epochs=epochs)
         case 'basic_kd':
             from compression_methods.basic_kd import distill
-            if blocks is None:
+            if blocks is None and experimenter.model_name == "resnet18":
                 blocks = [1, 1, 2, 2]
+            elif blocks is None and experimenter.model_name == "resnet34":
+                blocks = [2, 3, 6, 3]
+            elif blocks is None and experimenter.model_name == "resnet50":
+                blocks = [2, 3, 6, 3]
 
             student_model, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = distill(
                 experimenter, data_handler, device=device,

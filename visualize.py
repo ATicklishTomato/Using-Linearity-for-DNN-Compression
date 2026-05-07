@@ -3,7 +3,8 @@ import json
 import glob
 import numpy as np
 import utils.util_functions as utils
-from experiments.relation import scatterplot_linearity_pruning_scores
+from itertools import product
+from experiments.relation import scatterplot_linearity_pruning_scores, visualize_cka_similarity_matrix
 
 pretty_model_names = {
     'resnet18': 'ResNet-18',
@@ -30,22 +31,23 @@ pretty_linearity_names = {
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--rq', type=str, choices=['rq1', 'rq2', 'benchmark'], default='rq1',
+    parser.add_argument('--rq', type=str, choices=['rq1', 'rq2', 'benchmark'], default=['rq1'], nargs='+',
                         help='Which Research Question to aggregate results for')
-    parser.add_argument('--threshold', type=int, default=75,
+    parser.add_argument('--threshold', type=int, default=[75], nargs='+',
                         help='Threshold to aggregate results for')
-    parser.add_argument('--model', type=str,
+    parser.add_argument('--model', type=str, nargs='+',
                         choices=['resnet18', 'resnet34', 'resnet50', 'llama-2-7b', 'llama-2-13b', 'llama-3-1b', 'llama-3-3b'],
-                        default='resnet18',
+                        default=['resnet18'],
                         help='Which model to aggregate results for')
-    parser.add_argument('--dataset', type=str, choices=['imagenet', 'tinystories', 'cifar10'], default='imagenet',
+    parser.add_argument('--dataset', type=str, choices=['imagenet', 'tinystories', 'cifar10'],
+                        default=['imagenet'], nargs='+',
                         help='Which dataset to aggregate results for')
-    parser.add_argument('--relation_to', type=str,
-                        choices=['magnitude_pruning', 'basic_kd'], default='magnitude_pruning',
+    parser.add_argument('--relation_to', type=str, nargs='+',
+                        choices=['magnitude_pruning', 'basic_kd'], default=['magnitude_pruning'],
                         help='Which relation type to aggregate results for')
-    parser.add_argument('--linearity', type=str,
+    parser.add_argument('--linearity', type=str, nargs='+',
                         choices=['mean_preactivation', 'procrustes', 'fraction'],
-                        default='mean_preactivation',
+                        default=['mean_preactivation'],
                         help='Linearity metric to use. `mean_preactivation` refers to the mean of preactivations as defined by Pinson et al. (2024). ' +
                              '`procrustes` refers to the Procrustes similarity-based metric as defined by Razzhigaev et al (2024). ' +
                              '`fraction` refers to the fraction of neurons that is activated by an activation function.')
@@ -71,15 +73,15 @@ def mean_rq1_results(path):
     mean_results = {metric: sum(values)/len(values) for metric, values in results.items()}
     return mean_results
 
-def generate_latex_results_table(mean_results, args, path):
+def generate_latex_results_table(mean_results, model, dataset, linearity, threshold, path):
     """This function takes a dictionary of mean results, and generates a latex table. Gets stored in the results directory"""
 
     caption = (
-        f"Results for {pretty_model_names[args.model]} trained on {pretty_dataset_names[args.dataset]} " +
-        f"with the {pretty_linearity_names[args.linearity]} linearity metric averaged over 5 runs"
+        f"Results for {pretty_model_names[model]} trained on {pretty_dataset_names[dataset]} " +
+        f"with the {pretty_linearity_names[linearity]} linearity metric averaged over 5 runs"
     )
 
-    label = f"tab:{args.model}_{args.dataset}_{args.linearity}_results"
+    label = f"tab:{model}_{dataset}_{linearity}_results"
 
     lines = []
     lines.append("\\begin{table}[h]")
@@ -97,7 +99,7 @@ def generate_latex_results_table(mean_results, args, path):
         "\\textbf{Speedup$\\uparrow$} & "
         "\\textbf{GFLOP Reduction$\\uparrow$} \\\\\\hline"
     )
-    lines.append(f"Ours & {args.threshold} & {mean_results['accuracy_loss']*100:.4f}\\% & {mean_results['param_compression_ratio']:.4f} & {mean_results['speedup']:.4f} & {mean_results['gflop_reduction']:.4f} \\\\")
+    lines.append(f"Ours & {threshold} & {mean_results['accuracy_loss']*100:.4f}\\% & {mean_results['param_compression_ratio']:.4f} & {mean_results['speedup']:.4f} & {mean_results['gflop_reduction']:.4f} \\\\")
     lines.append("\\end{tabular}}")
     lines.append("\\end{center}")
     lines.append("\\end{table}")
@@ -187,39 +189,98 @@ def avg_rq2_prune_scores(path):
 
     return avg_linearity_scores, avg_pruning_ratios
 
+def avg_rq2_linearity_scores(path):
+    linearity_scores = {}
+    student_layer_names = []
+    teacher_layer_names = []
+    files = glob.glob(path + '/**/*.json', recursive=True)
+    print(files)
+    for file in files:
+        with open(file, 'r') as f:
+            if "student_layer_names" in file and len(student_layer_names) <= 0:
+                student_layer_names = list(json.load(f))
+            elif "teacher_layer_names" in file and len(teacher_layer_names) <= 0:
+                teacher_layer_names = list(json.load(f))
+            elif "linearity_scores" in file:
+                data = json.load(f)
+                # If keys are present in accumulating dict, append values to the value list. Otherwise, create new key with single entry list
+                for key, value in data.items():
+                    if key in linearity_scores.keys():
+                        linearity_scores[key].append(value)
+                    else:
+                        linearity_scores[key] = [value]
+
+    avg_linearity_scores = {}
+    for key, value in linearity_scores.items():
+        avg_linearity_scores[key] = np.mean(value)
+
+    return avg_linearity_scores, student_layer_names, teacher_layer_names
+
+def avg_rq2_matrix_values(path):
+    files = glob.glob(path + '/**/cka_similarity_matrix.npy', recursive=True)
+    print(files)
+    avg_matrix = None
+    for file in files:
+        matrix = np.load(file)
+        if avg_matrix is None:
+            avg_matrix = matrix
+        else:
+            avg_matrix += matrix
+    avg_matrix /= len(files)
+    return avg_matrix
+
 if __name__ == '__main__':
     args = parse_args()
-    print(f"Aggregating results for RQ: {args.rq}, Threshold: {args.threshold}, Model: {args.model}, Dataset: {args.dataset}, Relation: {args.relation_to}" +
-      f", Linearity: {args.linearity}")
-    if args.rq == 'rq1':
-        path = f"./results/{args.rq}/{args.linearity}/{args.threshold}/{args.model}/{args.dataset}/"
-    elif args.rq == 'rq2':
-        path = f"./results/{args.rq}/{args.linearity}/{args.relation_to}/{args.model}/{args.dataset}/"
-    elif args.rq == 'benchmark':
-        path = f"./old_results/rq2/{args.relation_to}/{args.model}/{args.dataset}/"
-        # path = f"./results/rq2/{args.linearity}/{args.relation_to}/{args.model}/{args.dataset}/"
-    else:
-        raise ValueError("Invalid RQ choice. Must be one of 'rq1', 'rq2', or 'benchmark'.")
 
-    print(path)
+    options = [args.rq, args.threshold, args.model, args.dataset, args.relation_to, args.linearity]
+    combinations = list(product(*options))
+    failed_combinations = []
 
-    match (args.rq):
-        case 'rq1':
-            mean_results = mean_rq1_results(path)
-            print("Mean results:", mean_results)
-            generate_latex_results_table(mean_results, args, path)
-        case 'rq2':
-            if args.relation_to == 'magnitude_pruning':
-                # Compute average scatterplot
-                avg_linearity_scores, avg_pruning_ratios = avg_rq2_prune_scores(path)
-                print("Average Linearity Scores:", avg_linearity_scores)
-                print("Average Pruning Ratios:", avg_pruning_ratios)
-                scatterplot_linearity_pruning_scores(avg_linearity_scores, avg_pruning_ratios, path)
+    for rq, threshold, model, dataset, relation_to, linearity in combinations:
+        try:
+            print(f"Aggregating results for RQ: {rq}, Threshold: {threshold}, Model: {model}, Dataset: {dataset}, Relation: {relation_to}" +
+              f", Linearity: {linearity}")
+            if rq == 'rq1':
+                path = f"./results/{rq}/{linearity}/{threshold}/{model}/{dataset}/"
+            elif rq == 'rq2':
+                path = f"./results/{rq}/{linearity}/{relation_to}/{model}/{dataset}/"
+            elif rq == 'benchmark':
+                path = f"./results/rq2/{linearity}/{relation_to}/{model}/{dataset}/"
             else:
-                raise NotImplementedError
-        case 'benchmark':
-            base_performance_path = f"./results/rq1/{args.linearity}/{args.threshold}/{args.model}/{args.dataset}/**/*results.json"
-            mean_bench = mean_benchmark_results(path, base_metrics_path=base_performance_path)
-            print("Benchmark results:", mean_bench)
-            generate_latex_results_table(mean_bench, args, path)
+                raise ValueError("Invalid RQ choice. Must be one of 'rq1', 'rq2', or 'benchmark'.")
 
+            print(path)
+
+            match rq:
+                case 'rq1':
+                    mean_results = mean_rq1_results(path)
+                    print("Mean results:", mean_results)
+                    generate_latex_results_table(mean_results, model, dataset, linearity, threshold, path)
+                case 'rq2':
+                    if relation_to == 'magnitude_pruning':
+                        # Compute average scatterplot
+                        avg_linearity_scores, avg_pruning_ratios = avg_rq2_prune_scores(path)
+                        print("Average Linearity Scores example:", list(avg_linearity_scores.items())[:5])
+                        print("Average Pruning Ratios example:", list(avg_pruning_ratios.items())[:5])
+                        scatterplot_linearity_pruning_scores(avg_linearity_scores, avg_pruning_ratios, path)
+                    elif relation_to == 'basic_kd':
+                        avg_matrix = avg_rq2_matrix_values(path)
+                        avg_linearity_scores, student_layer_names, teacher_layer_names = avg_rq2_linearity_scores(path)
+                        print("Average Linearity Scores example:", list(avg_linearity_scores.items())[:5])
+                        visualize_cka_similarity_matrix(avg_matrix, path, teacher_layer_names, student_layer_names,
+                                                        avg_linearity_scores)
+                    else:
+                        raise NotImplementedError
+                case 'benchmark':
+                    base_performance_path = f"./results/rq1/{linearity}/{threshold}/{model}/{dataset}/**/*results.json"
+                    mean_bench = mean_benchmark_results(path, base_metrics_path=base_performance_path)
+                    print("Benchmark results:", mean_bench)
+                    generate_latex_results_table(mean_bench, model, dataset, linearity, threshold, path)
+        except Exception as e:
+            failed_combinations.append((rq, threshold, model, dataset, relation_to, linearity, e))
+
+    print(f"Successful combinations: {len(combinations) - len(failed_combinations)}")
+    print(f"Failed combinations: {len(failed_combinations)}")
+    for failed_combination in failed_combinations:
+        print(f"Failed combination: RQ: {failed_combination[0]}, Threshold: {failed_combination[1]}, Model: {failed_combination[2]}, " +
+              f"Dataset: {failed_combination[3]}, Relation: {failed_combination[4]}, Linearity: {failed_combination[5]}, Error: {failed_combination[6]}")

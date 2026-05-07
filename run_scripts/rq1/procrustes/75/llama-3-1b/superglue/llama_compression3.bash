@@ -4,7 +4,7 @@
 #SBATCH --output=llama_compression3_output_%j.txt
 #SBATCH --partition gpu_h100
 #SBATCH --gpus=1
-#SBATCH --time=08:00:00
+#SBATCH --time=05:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=5
