@@ -21,4 +21,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m resnet50 -d cifar10 -e compression --max_batches 1024 --threshold "75%" --epochs 20 --seed 2409 --save --skip_finetune
+python main.py -m resnet50 -d cifar10 -e compression --threshold "75%" --epochs 20 --seed 2409 --save --skip_finetune

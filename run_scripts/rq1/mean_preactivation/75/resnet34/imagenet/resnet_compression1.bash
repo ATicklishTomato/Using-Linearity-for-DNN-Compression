@@ -21,4 +21,4 @@ source .venv/bin/activate # Activate virtual environment
 pip install -r requirements.txt
 
 # Execute the script or command
-python main.py -m resnet34 -d imagenet -e compression --max_batches 1024 --threshold "75%" --seed 42 --save --skip_finetune
+python main.py -m resnet34 -d imagenet -e compression --threshold "75%" --seed 42 --save --skip_finetune

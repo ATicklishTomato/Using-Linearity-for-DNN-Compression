@@ -1,8 +1,8 @@
 
 
-path = "./*/*/*/llama-3-1b/*/*.bash"
-target = "--time=08:00:00"
-replace = "--time=05:00:00"
+path = "./*/*/*/resnet*/*/*.bash"
+target = " --max_batches 1024"
+replace = ""
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path

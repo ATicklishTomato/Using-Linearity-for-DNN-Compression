@@ -20,6 +20,7 @@ pretty_dataset_names = {
     'imagenet': 'ImageNet',
     'tinystories': 'TinyStories',
     'cifar10': 'CIFAR-10',
+    'superglue': 'SuperGLUE',
 }
 
 pretty_linearity_names = {
@@ -39,7 +40,7 @@ def parse_args():
                         choices=['resnet18', 'resnet34', 'resnet50', 'llama-2-7b', 'llama-2-13b', 'llama-3-1b', 'llama-3-3b'],
                         default=['resnet18'],
                         help='Which model to aggregate results for')
-    parser.add_argument('--dataset', type=str, choices=['imagenet', 'tinystories', 'cifar10'],
+    parser.add_argument('--dataset', type=str, choices=['imagenet', 'tinystories', 'cifar10', 'superglue'],
                         default=['imagenet'], nargs='+',
                         help='Which dataset to aggregate results for')
     parser.add_argument('--relation_to', type=str, nargs='+',
@@ -109,52 +110,24 @@ def generate_latex_results_table(mean_results, model, dataset, linearity, thresh
     with open(path + '/results.tex', 'w') as f:
         f.write(table)
 
-def mean_benchmark_results(path, base_metrics_path="./results/rq1/mean_preactivation/75/resnet18/imagenet/**/*results.json"):
-    comp_metrics = ['comp_acc', 'comp_params', 'comp_infer', 'comp_gflops']
-    base_metrics = ['original_accuracy', 'original_param_count', 'original_inference_time', 'original_gflops']
-
-    # Get the base metrics from all json files in base metrics path and average them out
-    base_metrics_files = glob.glob(base_metrics_path, recursive=True)
-    base_results = {metric: [] for metric in base_metrics}
-    for file in base_metrics_files:
+def mean_benchmark_results(path):
+    metrics = ['accuracy_loss', 'param_compression_ratio', 'speedup', 'gflop_reduction']
+    results = {metric: [] for metric in metrics}
+    files = glob.glob(path + '/**/wandb_logging_data.json', recursive=True)
+    for file in files:
         with open(file, 'r') as f:
             data = json.load(f)
-            base_results['original_accuracy'].append(data['original_accuracy'])
-            base_results['original_param_count'].append(data['original_param_count'])
-            base_results['original_inference_time'].append(data['original_inference_time'])
-            if 'original_tflops' in data.keys():
+            results['accuracy_loss'].append(data['accuracy_loss'])
+            results['param_compression_ratio'].append(data['param_compression_ratio'])
+            results['speedup'].append(data['speedup'])
+            if 'tflop_reduction' in data.keys():
                 # Some data was labeled wrongly, this deals with that
-                base_results['original_gflops'].append(data['original_tflops'])
+                results['gflop_reduction'].append(data['tflop_reduction'])
             else:
-                base_results['original_gflops'].append(data['original_gflops'])
+                results['gflop_reduction'].append(data['gflop_reduction'])
 
-    base_results = {metric: sum(values)/len(values) for metric, values in base_results.items()}
-
-    # Get the compression method results and average them out
-    comp_metrics_files = glob.glob(path + "*.json")
-    comp_results = {metric: [] for metric in comp_metrics}
-    for file in comp_metrics_files:
-        with open(file, 'r') as f:
-            data = json.load(f)
-            comp_results['comp_acc'] = data['comp_acc']
-            comp_results['comp_params'] = data['comp_params']
-            comp_results['comp_infer'] = data['comp_infer']
-            comp_results['comp_gflops'] = data['comp_gflops']
-
-    comp_results = {metric: sum(values)/len(values) for metric, values in comp_results.items()}
-
-    # Compute accuracy_loss, param_compression_ratio, speedup, and gflop_reduction
-    accuracy_loss = utils.accuracy_loss(base_results['original_accuracy'], comp_results['comp_acc'])
-    param_compression_ratio = utils.compression_ratio(base_results['original_param_count'], comp_results['comp_params'])
-    speedup = utils.speedup(base_results['original_inference_time'], comp_results['comp_infer'])
-    gflop_reduction = utils.gflop_reduction(base_results['original_gflops'], comp_results['comp_gflops'])
-
-    return {
-        'accuracy_loss': accuracy_loss,
-        'param_compression_ratio': param_compression_ratio,
-        'speedup': speedup,
-        'gflop_reduction': gflop_reduction,
-    }
+    mean_results = {metric: sum(values) / len(values) for metric, values in results.items()}
+    return mean_results
 
 
 def avg_rq2_prune_scores(path):
@@ -272,8 +245,7 @@ if __name__ == '__main__':
                     else:
                         raise NotImplementedError
                 case 'benchmark':
-                    base_performance_path = f"./results/rq1/{linearity}/{threshold}/{model}/{dataset}/**/*results.json"
-                    mean_bench = mean_benchmark_results(path, base_metrics_path=base_performance_path)
+                    mean_bench = mean_benchmark_results(path)
                     print("Benchmark results:", mean_bench)
                     generate_latex_results_table(mean_bench, model, dataset, linearity, threshold, path)
         except Exception as e:

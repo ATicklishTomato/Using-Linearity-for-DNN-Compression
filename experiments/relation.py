@@ -201,16 +201,22 @@ def visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, stude
         linearity_scores: A list of the linearity scores for each layer (length m).
     """
     logger.info(f"Visualizing CKA similarity matrix with shape {matrix.shape} and saving to {save_dir}/cka_similarity_heatmap.png")
-    model_name = "llama" if "llama" in save_dir else "resnet"
+    linearity_score = save_dir.split("/")[3]
+    kd_method = save_dir.split("/")[4]
+    model_name = save_dir.split("/")[5]
+    dataset = save_dir.split("/")[6]
 
-    ticks = []
-    x_labels = [name for name in student_layer_names if model_name == "resnet" or name.endswith('self_attn')]
-    y_labels = []
+    ticks = [] if "llama" in model_name else [0]
+    x_labels = [] if "llama" in model_name else ['conv1']
+    y_labels = [] if "llama" in model_name else ['conv1']
     for i, name in enumerate(teacher_layer_names):
         if name in linearity_scores:
             score = linearity_scores[name]
             ticks.append(i)
             y_labels.append(f"{name} ({score:.4f})")
+            if name in student_layer_names:
+                x_labels.append(name)
+
 
     plt.imshow(matrix, cmap='magma', vmin=0, vmax=1, origin='upper')
     plt.colorbar(label=f'CKA Similarity of {model_name} teacher and student layers')
@@ -219,10 +225,10 @@ def visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, stude
     # Move x-axis to top
     plt.gca().xaxis.tick_top()
     plt.gca().xaxis.set_label_position('top')
-    plt.xticks(ticks=range(len(x_labels)), labels=x_labels, rotation=90, fontsize=8)
+    plt.xticks(ticks=ticks[:len(x_labels)], labels=x_labels, rotation=90, fontsize=8)
     plt.yticks(ticks=ticks, labels=y_labels, rotation=0, fontsize=8)
     plt.tight_layout()
-    plt.savefig(f"{save_dir}/cka_similarity_heatmap.png")
+    plt.savefig(f"{save_dir}/cka_{model_name}_{linearity_score}_{kd_method}_{dataset}.png")
     plt.close()
 
 def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios: dict, save_dir: str) -> None:
@@ -237,6 +243,10 @@ def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios:
     logger.info(f"Computing scatterplot for {len(layer_names)} layers out of total {len(linearity_scores) + len(pruning_ratios)} layers.")
     linearity_values = [linearity_scores[name] for name in layer_names]
     pruning_values = [pruning_ratios[name] for name in layer_names] # Invert ratios to show the fraction of pruned weights
+    linearity_score = save_dir.split("/")[3]
+    prune_method = save_dir.split("/")[4]
+    model_name = save_dir.split("/")[5]
+    dataset = save_dir.split("/")[6]
 
     plt.figure(figsize=(10, 6))
     plt.scatter(linearity_values, pruning_values)
@@ -246,10 +256,10 @@ def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios:
 
     plt.xlabel('Linearity Compression Score')
     plt.ylabel('Fraction of pruned weights')
-    plt.title('Linearity Compression Scores vs Pruning Ratios')
+    plt.title('Linearity Compression Scores vs Pruning Ratios for ' + model_name)
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f"{save_dir}/linearity_pruning_scatterplot.png")
+    plt.savefig(f"{save_dir}/scatterplot_{model_name}_{linearity_score}_{prune_method}_{dataset}.png")
     plt.close()
 
 def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, batch_size: int,
