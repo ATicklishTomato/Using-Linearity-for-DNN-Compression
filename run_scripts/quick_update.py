@@ -1,8 +1,8 @@
 
 
-path = "./*/procrustes/*/*/*/*.bash"
-target = "--mem=16G"
-replace = "--mem=32G"
+path = "./*/*/*/*/superglue/*3.bash"
+target = "gpu_a100"
+replace = "gpu_h100"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path
