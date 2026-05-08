@@ -1,8 +1,8 @@
 
 
-path = "./*/procrustes/*/resnet50/*/*.bash"
-target = "--mem=32G"
-replace = "--mem=64G"
+path = "./rq2/*/taylor_pruning/*/*/*.bash"
+target = "taynitude_pruning"
+replace = "taylor_pruning"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path
