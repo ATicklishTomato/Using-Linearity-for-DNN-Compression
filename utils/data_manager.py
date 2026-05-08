@@ -21,6 +21,7 @@ class DataManager:
 
         self.dataset_name = dataset_name
         self.batch_size = batch_size
+        self.seed = seed
 
         match model_name:
             case "llama-2-7b":
