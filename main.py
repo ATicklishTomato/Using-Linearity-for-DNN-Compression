@@ -38,7 +38,7 @@ def parse_args():
                              '"linear_approximator_compression" tests linear approximation for ResNets. ' +
                              '"benchmark_compression" runs other compression methods to allow a comparison.')
     parser.add_argument('--relation', type=str,
-                        choices=['magnitude_pruning', 'basic_kd', 'hessian_pruning', 'taylor_pruning'],
+                        choices=['magnitude_pruning', 'basic_kd', 'hessian_pruning', 'taylor_pruning', 'feature_kd', 'born_again_kd'],
                         default='magnitude_pruning',
                         help='The relation experiment to run. Only applicable if experiment type is "relation". Ignored otherwise.')
     parser.add_argument('-t', '--threshold', type=str,

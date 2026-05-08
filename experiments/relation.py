@@ -378,6 +378,32 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
                 experimenter, data_handler, device=device,
                 lr=lr, epochs=epochs, blocks=blocks,
                 hidden_layer_reduction=hidden_layer_reduction)
+        case 'feature_kd':
+            from compression_methods.feature_kd import distill
+            if blocks is None and experimenter.model_name == "resnet18":
+                blocks = [1, 1, 2, 2]
+            elif blocks is None and experimenter.model_name == "resnet34":
+                blocks = [2, 3, 6, 3]
+            elif blocks is None and experimenter.model_name == "resnet50":
+                blocks = [2, 3, 6, 3]
+
+            student_model, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = distill(
+                experimenter, data_handler, device=device,
+                lr=lr, epochs=epochs, blocks=blocks,
+                hidden_layer_reduction=hidden_layer_reduction)
+        case 'born_again_kd':
+            from compression_methods.born_again_kd import distill
+            if blocks is None and experimenter.model_name == "resnet18":
+                blocks = [[1, 1, 2, 2], [1, 1, 1, 2]]
+            elif blocks is None and experimenter.model_name == "resnet34":
+                blocks = [[2, 3, 6, 3], [2, 3, 5, 3]]
+            elif blocks is None and experimenter.model_name == "resnet50":
+                blocks = [[2, 3, 6, 3], [2, 3, 5, 3]]
+
+            student_model, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = distill(
+                experimenter, data_handler, device=device,
+                lr=lr, epochs=epochs, blocks_iterations=blocks,
+                hidden_layer_reduction_iterations=[2,3])
 
     logger.info(f"Compressed model evaluated with accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, "
                 f"inference time: {compressed_inference_time:.4f} seconds, gflops: {compressed_gflops}")

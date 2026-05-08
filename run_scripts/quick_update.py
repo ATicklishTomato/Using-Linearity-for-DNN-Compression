@@ -1,8 +1,8 @@
 
 
-path = "./*/*/*/resnet*/*/*.bash"
-target = " --max_batches 1024"
-replace = ""
+path = "./*/procrustes/*/resnet50/*/*.bash"
+target = "--mem=32G"
+replace = "--mem=64G"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path
