@@ -1,7 +1,7 @@
 from copy import deepcopy
-from slicegpt import data_utils, layernorm_fusion, rotate
-from slicegpt.slicing_scheduler import ConstSlicingScheduler
-from slicegpt.adapters.llama_adapter import LlamaModelAdapter
+from utils.slicegpt import data_utils, layernorm_fusion, rotate
+from utils.slicegpt.slicing_scheduler import ConstSlicingScheduler
+from utils.slicegpt.adapters.llama_adapter import LlamaModelAdapter
 from compression_methods.magnitude_pruning import finetune_llama, evaluate_llama
 import logging
 import torch
@@ -55,7 +55,6 @@ def generate_prune_dict(model, before_sizes):
 
     return prune_dict
 
-# pip install git+https://github.com/microsoft/TransformerCompression.git
 def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5, batch_size=64, epochs=10):
     """
     Wrapper function for pruning models based on their architecture.
@@ -114,6 +113,13 @@ def run_slicegpt(
             model.lm_head.weight.clone()
         )
 
+    print("Replacing layers...")
+    layernorm_fusion.replace_layers(model_adapter)  # <-- missing
+
+    # Attach rotary_emb to each layer so forward can recompute position embeddings
+    for layer in model.model.layers:
+        layer.rotary_emb = model.model.rotary_emb
+
     print("Fusing LayerNorms...")
     layernorm_fusion.fuse_modules(model_adapter)
 
@@ -129,7 +135,7 @@ def run_slicegpt(
 
     def to_tensor_loader(dataloader):
         for batch in dataloader:
-            yield batch["input_ids"]
+            yield batch
 
     # Step 4: rotate and slice in one pass
     print(f"Rotating and slicing at sparsity={sparsity}...")

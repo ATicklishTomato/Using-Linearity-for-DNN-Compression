@@ -19,10 +19,11 @@ It will eventually contain all experiments and related artifacts.
 
 ## Requirements
 Use a virtual environment or conda environment to avoid conflicts with other projects. Python 3.11 or higher is recommended.
+PyTorch version used is 2.5.1 with CUDA 12.1. No guarantees can be given for other versions.
 
 Install dependencies:
 ```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
 ```
 Installing torch separately before the requirements tends to avoid issues with torch+cuda versioning inside the requirements file.

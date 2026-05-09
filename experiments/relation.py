@@ -354,13 +354,37 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
                 pruning_ratio=pruning_ratio, lr=lr,
                 batch_size=batch_size, epochs=epochs)
         case 'hessian_pruning':
+            if "llama" in experimenter.model_name:
+                raise ValueError("Hessian pruning is not supported for Llama models")
+
             from compression_methods.hessian_pruning import prune
             prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
                 experimenter, data_handler, device=device,
                 pruning_ratio=pruning_ratio, lr=lr,
                 batch_size=batch_size, epochs=epochs)
         case 'taylor_pruning':
+            if "llama" in experimenter.model_name:
+                raise ValueError("Taylor pruning is not supported for Llama models")
+
             from compression_methods.taylor_pruning import prune
+            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
+                experimenter, data_handler, device=device,
+                pruning_ratio=pruning_ratio, lr=lr,
+                batch_size=batch_size, epochs=epochs)
+        case 'wanda_pruning':
+            if "resnet" in experimenter.model_name:
+                raise ValueError("Wanda pruning is not supported for ResNet models")
+
+            from compression_methods.wanda_pruning import prune
+            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
+                experimenter, data_handler, device=device,
+                pruning_ratio=pruning_ratio, lr=lr,
+                batch_size=batch_size, epochs=epochs)
+        case 'slicegpt':
+            if "resnet" in experimenter.model_name:
+                raise ValueError("SliceGPT is not supported for ResNet models")
+
+            from compression_methods.slicegpt import prune
             prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
                 experimenter, data_handler, device=device,
                 pruning_ratio=pruning_ratio, lr=lr,

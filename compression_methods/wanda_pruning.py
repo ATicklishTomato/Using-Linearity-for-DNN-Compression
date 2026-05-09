@@ -1,6 +1,12 @@
+from copy import deepcopy
+
 import torch
 import logging
 from torch import nn
+
+from compression_methods.magnitude_pruning import finetune_llama, evaluate_llama
+from compression_methods.slicegpt import compute_before, generate_prune_dict
+from utils.slicegpt import data_utils
 
 """
 This code is a modification of code in the repo supporting the paper
@@ -163,14 +169,21 @@ def return_given_alpha(alpha, sort_res, W_metric, tmp_metric, sum_before):
     return W_mask, cur_sparsity
 
 
-def prune(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_batches=20,
+def prune_llama(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_batches=20,
                 semistructured=False, sparsity_ratio=0.5):
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
     logger.info("loading calibdation data")
     # dataloader, _ = get_loaders("c4",nsamples=args.nsamples,seed=args.seed,seqlen=model.seqlen,tokenizer=tokenizer)
-    dataloader = data_handler.val_set
+    dataloader = data_utils.prepare_dataloader(
+        dataset=data_handler.train_set,
+        tokenizer=data_handler.tokenizer,
+        max_seqlen=512,
+        batch_size=data_handler.batch_size,
+        varied_seqlen=False,
+        seed=data_handler.seed,
+    )
     logger.info("dataset loading complete")
     with torch.no_grad():
         inps, outs, attention_mask, position_ids = prepare_calibration_input(model, dataloader, device)
@@ -250,3 +263,35 @@ def prune(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_batches=
 
     model.config.use_cache = use_cache
     torch.cuda.empty_cache()
+
+def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5, batch_size=64, epochs=10):
+    """
+    Wrapper function for pruning models based on their architecture.
+    Args:
+        experimenter:   Experimenter object containing the model to be pruned.
+        data_handler:   DataManager object.
+        device:         Device to use.
+        pruning_ratio:  Pruning ratio.
+        lr:            Learning rate to use.
+        batch_size:   Batch size to use.
+        epochs:        Number of epochs to use.
+    Returns:
+        dict: A dictionary containing the pruning ratios for each layer.
+        accuracy: Accuracy of the pruned model.
+        param_count: The number of parameters in the pruned model.
+        inference_time: Inference time of the pruned model.
+        gflops: GFLOPs of the pruned model.
+    """
+    model = deepcopy(experimenter.model)
+    logger.info(f"Made copy of model: {model}")
+
+    logger.info("Running Llama pruning")
+    layer_sizes_before = compute_before(model)
+    pruned_model = prune_llama(model, data_handler, device=device, sparsity_ratio=pruning_ratio)
+    prune_dict = generate_prune_dict(pruned_model, layer_sizes_before)
+    logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
+    finetune_llama(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device)
+    acc, param_count, inference_time, gflops = evaluate_llama(model, data_handler)
+
+    logger.info("Completed pruning evaluation")
+    return prune_dict, acc, param_count, inference_time, gflops

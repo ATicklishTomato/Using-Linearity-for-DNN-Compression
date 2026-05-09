@@ -1,8 +1,8 @@
 
 
-path = "./rq2/*/taylor_pruning/*/*/*.bash"
-target = "taynitude_pruning"
-replace = "taylor_pruning"
+path = "./*/*/*/llama-3-3b/*/*.bash"
+target = "gpu_a100"
+replace = "gpu_h100"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path
