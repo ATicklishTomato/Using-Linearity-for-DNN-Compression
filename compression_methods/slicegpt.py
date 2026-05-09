@@ -78,8 +78,9 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5,
 
     logger.info("Running Llama pruning")
     layer_sizes_before = compute_before(model)
-    pruned_model = run_slicegpt(model, data_handler, sparsity=pruning_ratio, device=device)
-    prune_dict = generate_prune_dict(pruned_model, layer_sizes_before)
+    model = run_slicegpt(model, data_handler, sparsity=pruning_ratio, device=device)
+    torch.cuda.empty_cache()
+    prune_dict = generate_prune_dict(model, layer_sizes_before)
     logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
     finetune_llama(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device)
     acc, param_count, inference_time, gflops = evaluate_llama(model, data_handler)
@@ -128,19 +129,16 @@ def run_slicegpt(
         dataset=data_handler.train_set,
         tokenizer=data_handler.tokenizer,
         max_seqlen=512,
-        batch_size=data_handler.batch_size,
+        batch_size=1,
+        nsamples=128,
         varied_seqlen=False,
         seed=data_handler.seed,
     )
 
-    def to_tensor_loader(dataloader):
-        for batch in dataloader:
-            yield batch
-
     # Step 4: rotate and slice in one pass
     print(f"Rotating and slicing at sparsity={sparsity}...")
     scheduler = ConstSlicingScheduler(int(model_adapter.hidden_size * (1 - sparsity)))
-    rotate.rotate_and_slice(model_adapter, to_tensor_loader(train_loader), scheduler)
+    rotate.rotate_and_slice(model_adapter, train_loader, scheduler)
 
     print(f"Done. Hidden dim: {model.config.hidden_size} -> {model_adapter.hidden_size}")
 
