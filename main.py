@@ -30,7 +30,7 @@ def parse_args():
                         default='imagenet',
                         help='Dataset to use for training and evaluation.')
     parser.add_argument('-e', '--experiment', type=str,
-                        choices=['relation', 'compression', 'linear_approximator_compression', 'benchmark_compression', ],
+                        choices=['relation', 'compression', 'linear_approximator_compression', 'benchmark_compression', "hybridization"],
                         default='compression',
                         help='The type of experiment to run. "relation" tests the relation between ' +
                              'inherent linearity and another compression method. "compression" tests ' +
@@ -190,6 +190,10 @@ if __name__ == '__main__':
             from experiments.relation import run_experiment
             run_experiment(args.model, args.linearity, args.dataset, args.relation, args.batch_size, args.epochs, args.lr,
                                           args.data_fraction, args.save, args.seed, args.device, skip_finetune_path)
+        case (_, 'hybridization'):
+            from experiments.hybridization import run_experiment
+            run_experiment(args.model, args.linearity, args.dataset, args.relation, args.batch_size, args.epochs, args.lr,
+                           args.data_fraction, args.save, args.seed, args.device, skip_finetune_path)
         case _:
             logger.error("Invalid combination of model, experiment, and relation.")
             raise ValueError("Invalid combination of model, experiment, and relation.")

@@ -18,8 +18,8 @@ from utils.resnet_model import ResNetExperimenter
 logger = logging.getLogger(__name__)
 
 def run_experiment(model_name, dataset, batch_size, epochs, lr, data_fraction, save,
-                   seed, device, skip_finetune_path: Optional[str], pruning_ratio=0.5, blocks=None,
-                   hidden_layer_reduction=2, return_for_relation=False):
+                   seed, device, skip_finetune_path: Optional[str], pruning_ratio=0.1, blocks=None,
+                   hidden_layer_reduction=2):
     """
     Run other compression methods on a given model and dataset to compare performance against linearity-based compression.
     Args:

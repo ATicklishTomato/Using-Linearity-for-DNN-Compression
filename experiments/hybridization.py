@@ -54,8 +54,8 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
             # Save finetuned original
             torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_original.pth")
             logger.info(f"Saved finetuned original model to {save_dir}/{model}_original.pth")
-    elif save:
-        logger.info(f"Skipping saving finetuned model as it was loaded from disk. Loaded from {skip_finetune_path}.")
+        elif save:
+            logger.info(f"Skipping saving finetuned model as it was loaded from disk. Loaded from {skip_finetune_path}.")
     elif "llama" in model:
         logger.info(
             f"Running Llama compression experiment with model: {model}, linearity metric: {linearity}, dataset: {dataset}, relation_to={compression_method}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, data fraction: {data_fraction}, save results: {save}, seed: {seed}, device: {device}")
@@ -73,18 +73,6 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
     else:
         raise ValueError(f"Unknown model: {model}")
     logger.info("Model and data loaded, model fine-tuned.")
-
-    # ------------------------------------------------------------
-    # Compute linearity scores
-    # ------------------------------------------------------------
-    # We hardcode threshold because we don't care about the split in this case
-    metric = LinearityMetric(linearity, model, data_handler, "50%", device, save, save_dir)
-    linearity_scores = metric.metric_fn(experimenter.model)
-    logger.info("Linearity scores computed.")
-    logger.debug(f"Linearity scores: {linearity_scores}")
-    linear_layers, nonlinear_layers = metric.thresholder(linearity_scores)
-    # We recombine the linear and nonlinear splits as we don't care
-    linearity_scores = {**linear_layers, **nonlinear_layers}
 
     # ------------------------------------------------------------
     # Evaluate initial model performance
@@ -106,7 +94,7 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
             elif blocks is None and experimenter.model_name == "resnet50":
                 blocks = [2, 3, 6, 3]
 
-            model, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = distill(
+            model, _, _, _, _ = distill(
                 experimenter, data_handler, device=device,
                 lr=lr, epochs=epochs, blocks=blocks,
                 hidden_layer_reduction=hidden_layer_reduction)
@@ -119,7 +107,7 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
             elif blocks is None and experimenter.model_name == "resnet50":
                 blocks = [2, 3, 6, 3]
 
-            model, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = distill(
+            model, _, _, _, _ = distill(
                 experimenter, data_handler, device=device,
                 lr=lr, epochs=epochs, blocks=blocks,
                 hidden_layer_reduction=hidden_layer_reduction)
@@ -136,6 +124,16 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
                 experimenter, data_handler, device=device,
                 lr=lr, epochs=epochs, blocks_iterations=blocks,
                 hidden_layer_reduction_iterations=[2, 3])
+
+    # ------------------------------------------------------------
+    # Compute linearity scores
+    # ------------------------------------------------------------
+    # We hardcode threshold because we don't care about the split in this case
+    metric = LinearityMetric(linearity, model, data_handler, "50%", device, save, save_dir)
+    linearity_scores = metric.metric_fn(experimenter.model)
+    logger.info("Linearity scores computed.")
+    logger.debug(f"Linearity scores: {linearity_scores}")
+    linear_layers, nonlinear_layers = metric.thresholder(linearity_scores)
 
     # ------------------------------------------------------------
     # Do linearity compression
@@ -232,7 +230,7 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
     # Log results to wandb and save models/results if enabled
     # ------------------------------------------------------------
     wandb_logging_data = {
-        "model": model,
+        "model": experimenter.model_name,
         "dataset": dataset,
         "compression_method": compression_method,
         "linearity": linearity,
@@ -266,12 +264,12 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
             json.dump(prune_dict, open(f"{save_dir}/prune_dict.json", "w"), indent=4)
             logger.info(f"Saved prune dict to {save_dir}/prune_dict.json")
         if "kd" in compression_method:
-            if "llama" in model:
+            if "llama" in experimenter.model_name:
                 # Save llama
-                experimenter.model.save_pretrained(f"{save_dir}/distilled_{model}")
+                experimenter.model.save_pretrained(f"{save_dir}/distilled_{experimenter.model_name}")
             else:
-                torch.save(model.state_dict(), f"{save_dir}/{model}_distilled.pth")
-            logger.info(f"Saved student model to {save_dir}/{model}_distilled.pth")
+                torch.save(model.state_dict(), f"{save_dir}/{experimenter.model_name}_distilled.pth")
+            logger.info(f"Saved student model to {save_dir}/{experimenter.model_name}_distilled.pth")
 
     if prune_dict is not None:
         wandb_logging_data["prune_dict"] = prune_dict
