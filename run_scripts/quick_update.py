@@ -1,8 +1,8 @@
 
 
-path = "./rq2/all/*/*/*/*.bash"
-target = "-l fraction "
-replace = ""
+path = "./rq1/approx/*/*/*/*/*.bash"
+target = '-e compression'
+replace = "-e linear_approximator_compression"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path
