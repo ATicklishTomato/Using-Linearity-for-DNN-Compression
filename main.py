@@ -30,7 +30,7 @@ def parse_args():
                         default='imagenet',
                         help='Dataset to use for training and evaluation.')
     parser.add_argument('-e', '--experiment', type=str,
-                        choices=['relation', 'compression', 'linear_approximator_compression', 'benchmark_compression'],
+                        choices=['relation', 'compression', 'linear_approximator_compression', 'benchmark_compression', ],
                         default='compression',
                         help='The type of experiment to run. "relation" tests the relation between ' +
                              'inherent linearity and another compression method. "compression" tests ' +

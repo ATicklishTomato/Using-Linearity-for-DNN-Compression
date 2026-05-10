@@ -1,15 +1,16 @@
 import json
 import os
 from typing import Optional
-
-import torch
 import wandb
-
-from compression_methods.basic_kd import distill
-from compression_methods.magnitude_pruning import prune
-
+from compression_methods.basic_kd import distill as basic_distill
+from compression_methods.magnitude_pruning import prune as mag_prune
+from compression_methods.feature_kd import distill as feature_distill
+from compression_methods.born_again_kd import distill as born_again_distill
+from compression_methods.taylor_pruning import prune as taylor_prune
+from compression_methods.hessian_pruning import prune as hessian_prune
+from compression_methods.slicegpt import prune as slicegpt_prune
+from compression_methods.wanda_pruning import prune as wanda_prune
 import logging
-
 from utils.data_manager import DataManager
 from utils.llama_model import LlamaExperimenter
 from utils.resnet_model import ResNetExperimenter
@@ -58,59 +59,166 @@ def run_experiment(model_name, dataset, batch_size, epochs, lr, data_fraction, s
         raise ValueError(f"Unknown model name: {model_name}")
     logger.info("Model initialized.")
 
-    # Run magnitude pruning
-    prune_dict, mag_acc, mag_param, mag_infer, mag_gflops = prune(experimenter, data_handler, device=device,
-                                                                  pruning_ratio=pruning_ratio, lr=lr, batch_size=batch_size, epochs=epochs)
-    logger.info(f"Magnitude pruning completed. Acc: {mag_acc}, param: {mag_param}, infer: {mag_infer}, gflops: {mag_gflops}")
-    logger.info(prune_dict)
+    if blocks is None and experimenter.model_name == "resnet18":
+        blocks = [1, 1, 2, 2]
+    elif blocks is None and experimenter.model_name == "resnet34":
+        blocks = [2, 3, 6, 3]
+    elif blocks is None and experimenter.model_name == "resnet50":
+        blocks = [2, 3, 6, 3]
 
+    # Run pruning
+    prune_dict, acc, param, infer, gflops = mag_prune(experimenter, data_handler, device=device,
+                                                                  pruning_ratio=pruning_ratio, lr=lr, batch_size=batch_size, epochs=epochs)
+    logger.info(f"Magnitude pruning completed. Acc: {acc}, param: {param}, infer: {infer}, gflops: {gflops}")
+
+    mag_results = {
+        "accuracy": acc,
+        "params": param,
+        "inference_time": infer,
+        "gflops": gflops,
+        "prune_dict": prune_dict,
+    }
     wandb.log({
-        "compression_method": "magnitude",
-        "accuracy": mag_acc,
-        "params": mag_param,
-        "inference_time": mag_infer,
-        "gflops": mag_gflops,
+        "magnitude_pruning": mag_results,
     })
     logger.info("Saved magnitude pruning results to Weights & Biases.")
 
+    taylor_results, hessian_results, slicegpt_results, wanda_results = {}, {}, {}, {}
+    if "resnet" in model_name:
+        prune_dict, acc, param, infer, gflops = taylor_prune(experimenter, data_handler, device=device,
+                                                          pruning_ratio=pruning_ratio, lr=lr, batch_size=batch_size,
+                                                          epochs=epochs)
+        logger.info(f"Taylor pruning completed. Acc: {acc}, param: {param}, infer: {infer}, gflops: {gflops}")
+
+        taylor_results = {
+            "accuracy": acc,
+            "params": param,
+            "inference_time": infer,
+            "gflops": gflops,
+            "prune_dict": prune_dict,
+        }
+        wandb.log({
+            "taylor_pruning": taylor_results,
+        })
+        logger.info("Saved Taylor pruning results to Weights & Biases.")
+
+        prune_dict, acc, param, infer, gflops = hessian_prune(experimenter, data_handler, device=device,
+                                                          pruning_ratio=pruning_ratio, lr=lr, batch_size=batch_size,
+                                                          epochs=epochs)
+        logger.info(f"Hessian pruning completed. Acc: {acc}, param: {param}, infer: {infer}, gflops: {gflops}")
+
+        hessian_results = {
+            "accuracy": acc,
+            "params": param,
+            "inference_time": infer,
+            "gflops": gflops,
+            "prune_dict": prune_dict,
+        }
+        wandb.log({
+            "hessian_pruning": hessian_results,
+        })
+        logger.info("Saved Hessian pruning results to Weights & Biases.")
+    else:
+        prune_dict, acc, param, infer, gflops = slicegpt_prune(experimenter, data_handler, device=device,
+                                                          pruning_ratio=pruning_ratio, lr=lr, batch_size=batch_size,
+                                                          epochs=epochs)
+        logger.info(f"SliceGPT pruning completed. Acc: {acc}, param: {param}, infer: {infer}, gflops: {gflops}")
+
+        slicegpt_results = {
+            "accuracy": acc,
+            "params": param,
+            "inference_time": infer,
+            "gflops": gflops,
+            "prune_dict": prune_dict,
+        }
+        wandb.log({
+            "slicegpt_pruning": slicegpt_results,
+        })
+        logger.info("Saved SliceGPT pruning results to Weights & Biases.")
+
+        prune_dict, acc, param, infer, gflops = wanda_prune(experimenter, data_handler, device=device,
+                                                          pruning_ratio=pruning_ratio, lr=lr, batch_size=batch_size,
+                                                          epochs=epochs)
+        logger.info(f"Wanda pruning completed. Acc: {acc}, param: {param}, infer: {infer}, gflops: {gflops}")
+
+        wanda_results = {
+            "accuracy": acc,
+            "params": param,
+            "inference_time": infer,
+            "gflops": gflops,
+            "prune_dict": prune_dict,
+        }
+        wandb.log({
+            "wanda_pruning": wanda_results,
+        })
+        logger.info("Saved Wanda pruning results to Weights & Biases.")
+
     # Run distillation
-    student_model, dist_acc, dist_param, dist_infer, dist_gflops = distill(experimenter, data_handler, device=device,
+    _, acc, param, infer, gflops = basic_distill(experimenter, data_handler, device=device,
                                                                lr=lr, epochs=epochs, blocks=blocks, hidden_layer_reduction=hidden_layer_reduction)
-    student_model.cpu()
-    logger.info(f"Distillation completed. Acc: {dist_acc}, param: {dist_param}, infer: {dist_infer}, gflops: {dist_gflops}")
+    logger.info(f"Distillation completed. Acc: {acc}, param: {param}, infer: {infer}, gflops: {gflops}")
+
+    basic_kd_results = {
+                "accuracy": acc,
+                "params": param,
+                "inference_time": infer,
+                "gflops": gflops,
+            }
 
     wandb.log({
-        "compression_method": "classic distillation",
-        "accuracy": dist_acc,
-        "params": dist_param,
-        "inference_time": dist_infer,
-        "gflops": dist_gflops,
+        "basic_kd": basic_kd_results,
     })
-    logger.info("Saved classic distillation results to Weights & Biases.")
+    logger.info("Saved basic distillation results to Weights & Biases.")
+
+    _, acc, param, infer, gflops = feature_distill(
+                experimenter, data_handler, device=device,
+                lr=lr, epochs=epochs, blocks=blocks,
+                hidden_layer_reduction=hidden_layer_reduction)
+    logger.info(f"Feature distillation completed. Acc: {acc}, param: {param}, infer: {infer}, gflops: {gflops}")
+
+    feature_distill_results = {
+        "accuracy": acc,
+        "params": param,
+        "inference_time": infer,
+        "gflops": gflops,
+    }
+
+    wandb.log({
+        "feature_distillation": feature_distill_results,
+    })
+    logger.info("Saved feature distillation results to Weights & Biases.")
+
+    _, acc, param, infer, gflops = born_again_distill(
+                experimenter, data_handler, device=device,
+                lr=lr, epochs=epochs, blocks_iterations=blocks,
+                hidden_layer_reduction_iterations=[2,3])
+    logger.info(f"Born again distillation completed. Acc: {acc}, param: {param}, infer: {infer}, gflops: {gflops}")
+    born_again_results = {
+        "accuracy": acc,
+        "params": param,
+        "inference_time": infer,
+        "gflops": gflops,
+    }
+
+    wandb.log({
+        "born_again_distillation": born_again_results,
+    })
+    logger.info("Saved born again distillation results to Weights & Biases.")
 
     if save:
-        if "llama" in model_name:
-            # Save llama
-            experimenter.model.save_pretrained(f"{save_dir}/compressed_{student_model}")
-        else:
-            torch.save(student_model.state_dict(), f"{save_dir}/{model_name}_distilled.pth")
-        logger.info(f"Saved models to {save_dir} directory.")
-
         results = {
-            "magnitude_pruning": {
-                "prune_dict": prune_dict,
-                "accuracy": mag_acc,
-                "params": mag_param,
-                "inference_time": mag_infer,
-                "gflops": mag_gflops,
-            },
-            "classic_distillation": {
-                "accuracy": dist_acc,
-                "params": dist_param,
-                "inference_time": dist_infer,
-                "gflops": dist_gflops,
-            }
+            "magnitude_pruning": mag_results,
+            "basic_kd": basic_kd_results,
+            "feature_kd": feature_distill_results,
+            "born_again_kd": born_again_results,
         }
+
+        if "resnet" in model_name:
+            results["taylor_pruning"] = taylor_results
+            results["hessian_pruning"] = hessian_results
+        else:
+            results["slicegpt_pruning"] = slicegpt_results
+            results["wanda_pruning"] = wanda_results
 
         with open(f"{save_dir}/{model_name}_compression_benchmark_results.json", "w") as f:
             json.dump(results, f, indent=4)
@@ -118,11 +226,4 @@ def run_experiment(model_name, dataset, batch_size, epochs, lr, data_fraction, s
         logger.info(f"Saved results to {save_dir}/{model_name}_compression_benchmark_results.json")
 
     logger.info("Benchmark completed.")
-
-    if return_for_relation:
-        return {
-            "magnitude_pruning": prune_dict,
-            "classic_distillation": student_model,
-        }
-    return None
 

@@ -1,17 +1,8 @@
 import logging
 import os
-import re
 from typing import Union, Optional
-
-import numpy as np
 import torch
 import wandb
-import matplotlib
-
-matplotlib.use("Agg") # Avoid errors when running without UI
-from matplotlib import pyplot as plt
-from torch.utils.data import DataLoader
-
 from metrics.linearity_metric_manager import LinearityMetric
 from utils.data_manager import DataManager
 from utils.llama_model import LlamaExperimenter
@@ -43,12 +34,13 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
         blocks (Union[None, list]): The list of blocks to use for distilled resnet.
         hidden_layer_reduction (int): The number of hidden layers to remove for distilled llama.
     """
-    save_dir = "./results/rq2/" + linearity + "/" + compression_method + "/" + model + "/" + dataset + "/" + str(seed)
+    save_dir = "./results/rq2/" + linearity + "/" + compression_method + "_hybrid/" + model + "/" + dataset + "/" + str(seed)
     os.makedirs(save_dir, exist_ok=True)
 
     # ------------------------------------------------------------
     # Load data and model
     # ------------------------------------------------------------
+    experimenter, data_handler = None, None
     if "resnet" in model:
         logger.info(
             f"Running ResNet relation experiment with model={model}, linearity={linearity}, dataset={dataset}, relation_to={compression_method}, batch_size={batch_size}, epochs={epochs}, lr={lr}, data fraction: {data_fraction}, save={save}, seed={seed}, device={device}")
@@ -102,22 +94,128 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
                 f"inference time: {original_inference_time:.4f} seconds, gflops: {original_gflops}")
 
     # --------------------------------------------------------------
-    # Compute pruning ratios or student model
+    # Distill if that's the hybrid pairing
     # --------------------------------------------------------------
-    prune_dict, student_model = None, None
+    match compression_method:
+        case 'basic_kd':
+            from compression_methods.basic_kd import distill
+            if blocks is None and experimenter.model_name == "resnet18":
+                blocks = [1, 1, 2, 2]
+            elif blocks is None and experimenter.model_name == "resnet34":
+                blocks = [2, 3, 6, 3]
+            elif blocks is None and experimenter.model_name == "resnet50":
+                blocks = [2, 3, 6, 3]
+
+            model, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = distill(
+                experimenter, data_handler, device=device,
+                lr=lr, epochs=epochs, blocks=blocks,
+                hidden_layer_reduction=hidden_layer_reduction)
+        case 'feature_kd':
+            from compression_methods.feature_kd import distill
+            if blocks is None and experimenter.model_name == "resnet18":
+                blocks = [1, 1, 2, 2]
+            elif blocks is None and experimenter.model_name == "resnet34":
+                blocks = [2, 3, 6, 3]
+            elif blocks is None and experimenter.model_name == "resnet50":
+                blocks = [2, 3, 6, 3]
+
+            model, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = distill(
+                experimenter, data_handler, device=device,
+                lr=lr, epochs=epochs, blocks=blocks,
+                hidden_layer_reduction=hidden_layer_reduction)
+        case 'born_again_kd':
+            from compression_methods.born_again_kd import distill
+            if blocks is None and experimenter.model_name == "resnet18":
+                blocks = [[1, 1, 2, 2], [1, 1, 1, 2]]
+            elif blocks is None and experimenter.model_name == "resnet34":
+                blocks = [[2, 3, 6, 3], [2, 3, 5, 3]]
+            elif blocks is None and experimenter.model_name == "resnet50":
+                blocks = [[2, 3, 6, 3], [2, 3, 5, 3]]
+
+            model, _, _, _, _ = distill(
+                experimenter, data_handler, device=device,
+                lr=lr, epochs=epochs, blocks_iterations=blocks,
+                hidden_layer_reduction_iterations=[2, 3])
+
+    # ------------------------------------------------------------
+    # Do linearity compression
+    # ------------------------------------------------------------
+
+    if "resnet" in experimenter.model_name:
+        from experiments.resnet_approx_compression import group_contiguous_layers, train_approximation_layers
+        all_layers = list(linear_layers.keys()) + list(nonlinear_layers.keys())
+        groups = group_contiguous_layers(linear_layers, all_layers, experimenter.model)
+        train_approximation_layers(experimenter, data_handler, groups, epochs=epochs, lr=lr,
+                                   batch_size=batch_size, device=device)
+        logger.info("Linear approximation layers trained and integrated into the model.")
+    else:
+        from experiments.llama_approx_compression import group_contiguous_layers, train_approximation_layers
+        groups = group_contiguous_layers(linear_layers)
+        train_approximation_layers(experimenter, data_handler, groups, save_model=save,
+                                   epochs=epochs, lr=lr, device=device, save_path=save_dir)
+        logger.info("Linear approximation layers trained and integrated into the model.")
+
+    experimenter.finetune()
+
+    compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = experimenter.validate_model()
+    logger.info(f"Merged model accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, "
+                f"inference time: {compressed_inference_time:.4f} seconds, gflops: {compressed_gflops}")
+
+
+
+    # ------------------------------------------------------------
+    # Apply pruning if that is the hybrid pairing
+    # ------------------------------------------------------------
+    prune_dict = None
     match compression_method:
         case 'magnitude_pruning':
             from compression_methods.magnitude_pruning import prune
-            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(experimenter, data_handler, device=device,
-                                                                          pruning_ratio=pruning_ratio, lr=lr,
-                                                          batch_size=batch_size, epochs=epochs)
-        case 'basic_kd':
-            from compression_methods.basic_kd import distill
-            if blocks is None:
-                blocks = [1,1,2,2]
-            student_model, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = distill(experimenter, data_handler,device=device,
-                                                                                   lr=lr, epochs=epochs, blocks=blocks,
-                                                                                   hidden_layer_reduction=hidden_layer_reduction)
+            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
+                experimenter, data_handler, device=device,
+                pruning_ratio=pruning_ratio, lr=lr,
+                batch_size=batch_size, epochs=epochs)
+        case 'hessian_pruning':
+            if "llama" in experimenter.model_name:
+                raise ValueError("Hessian pruning is not supported for Llama models")
+
+            from compression_methods.hessian_pruning import prune
+
+            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
+                experimenter, data_handler, device=device,
+                pruning_ratio=pruning_ratio, lr=lr,
+                batch_size=batch_size, epochs=epochs)
+        case 'taylor_pruning':
+            if "llama" in experimenter.model_name:
+                raise ValueError("Taylor pruning is not supported for Llama models")
+
+            from compression_methods.taylor_pruning import prune
+
+            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
+                experimenter, data_handler, device=device,
+                pruning_ratio=pruning_ratio, lr=lr,
+                batch_size=batch_size, epochs=epochs)
+        case 'wanda_pruning':
+            if "resnet" in experimenter.model_name:
+                raise ValueError("Wanda pruning is not supported for ResNet models")
+
+            from compression_methods.wanda_pruning import prune
+
+            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
+                experimenter, data_handler, device=device,
+                pruning_ratio=pruning_ratio, lr=lr,
+                batch_size=batch_size, epochs=epochs)
+        case 'slicegpt':
+            if "resnet" in experimenter.model_name:
+                raise ValueError("SliceGPT is not supported for ResNet models")
+
+            from compression_methods.slicegpt import prune
+
+            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
+                experimenter, data_handler, device=device,
+                pruning_ratio=pruning_ratio, lr=lr,
+                batch_size=batch_size, epochs=epochs)
+
+
 
     # ------------------------------------------------------------
     # Evaluate compressed model performance
@@ -129,20 +227,6 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
     logger.info(f"Accuracy loss: {accuracy_loss:.4f}, Parameter compression ratio: {param_compression_ratio:.4f}, "
                 f"Speedup: {speedup:.4f}x, GFLOP reduction: {gflop_reduction:.4f}")
 
-    # --------------------------------------------------------------
-    # Generate either scatterplot or similarity matrix
-    # --------------------------------------------------------------
-    matrix = None
-    if prune_dict is not None:
-        scatterplot_linearity_pruning_scores(linearity_scores, prune_dict, save_dir)
-        logger.info("Saved linearity vs pruning scatterplot.")
-    if student_model is not None:
-        data_loader = DataLoader(data_handler.val_set, batch_size=batch_size, shuffle=False)
-        matrix, teacher_layer_names, student_layer_names = cka_similarity_matrix(experimenter.model, student_model,
-                                                                                data_loader, device=device,
-                                                                                tokenizer=data_handler.tokenizer if "llama" in model else None)
-        visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, student_layer_names, linearity_scores)
-        logger.info("Saved cka similarity heatmap.")
 
     # ------------------------------------------------------------
     # Log results to wandb and save models/results if enabled
@@ -150,7 +234,7 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
     wandb_logging_data = {
         "model": model,
         "dataset": dataset,
-        "relation_to": compression_method,
+        "compression_method": compression_method,
         "linearity": linearity,
         "seed": seed,
         "linearity_scores": linearity_scores,
@@ -181,23 +265,18 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
         if prune_dict is not None:
             json.dump(prune_dict, open(f"{save_dir}/prune_dict.json", "w"), indent=4)
             logger.info(f"Saved prune dict to {save_dir}/prune_dict.json")
-        if student_model is not None:
+        if "kd" in compression_method:
             if "llama" in model:
                 # Save llama
-                experimenter.model.save_pretrained(f"{save_dir}/compressed_{model}")
+                experimenter.model.save_pretrained(f"{save_dir}/distilled_{model}")
             else:
-                torch.save(student_model.state_dict(), f"{save_dir}/{model}_distilled.pth")
+                torch.save(model.state_dict(), f"{save_dir}/{model}_distilled.pth")
             logger.info(f"Saved student model to {save_dir}/{model}_distilled.pth")
-
-            # Store cka matrix
-            np.save(f"{save_dir}/cka_similarity_matrix.npy", matrix)
-            logger.info(f"Saved CKA similarity matrix to {save_dir}/cka_similarity_matrix.npy")
 
     if prune_dict is not None:
         wandb_logging_data["prune_dict"] = prune_dict
-    if student_model is not None:
-        wandb_logging_data["student_model"] = student_model
-        wandb_logging_data["cka_similarity_matrix"] = matrix
+    if "kd" in compression_method:
+        wandb_logging_data["student_model"] = model
 
     wandb.log(wandb_logging_data)
     logger.info("Logged results to Weights & Biases")
