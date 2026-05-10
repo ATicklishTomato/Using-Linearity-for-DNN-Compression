@@ -1,3 +1,5 @@
+import glob
+import json
 import logging
 import os
 import re
@@ -8,6 +10,8 @@ import torch
 import wandb
 import matplotlib
 from torch import nn
+
+from metrics.procrustes import expand_scores_to_individual_layers
 
 matplotlib.use("Agg") # Avoid errors when running without UI
 from matplotlib import pyplot as plt
@@ -189,7 +193,8 @@ def cka_similarity_matrix(model_a, model_b, dataloader, device="cuda", tokenizer
 
     return matrix, names_a, names_b
 
-def visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, student_layer_names, linearity_scores):
+def visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, student_layer_names,
+                                    linearity_scores, linearity: str = None):
     """Creates a magma heatmap of the cka similarity matrix using matplotlib.
     Shows row and column indexes to roughly identify layers. Similarity scores are listed in the cells.
     Stores the visualization in ./results with the given filename.
@@ -199,9 +204,10 @@ def visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, stude
         teacher_layer_names: Names of the teacher layers.
         student_layer_names: Names of the student layers.
         linearity_scores: A list of the linearity scores for each layer (length m).
+        linearity: The name of the linearity score type. To override linearity score in relation experiments being read as 'all'
     """
     logger.info(f"Visualizing CKA similarity matrix with shape {matrix.shape} and saving to {save_dir}/cka_similarity_heatmap.png")
-    linearity_score = save_dir.split("/")[3]
+    linearity_score = save_dir.split("/")[3] if linearity is None else linearity
     kd_method = save_dir.split("/")[4]
     model_name = save_dir.split("/")[5]
     dataset = save_dir.split("/")[6]
@@ -231,19 +237,20 @@ def visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, stude
     plt.savefig(f"{save_dir}/cka_{model_name}_{linearity_score}_{kd_method}_{dataset}.png")
     plt.close()
 
-def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios: dict, save_dir: str) -> None:
+def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios: dict, save_dir: str, linearity: str = None) -> None:
     """Creates a scatterplot of the linearity compression scores and pruning scores for each layer.
     Points are labeled with their layer index. X-axis will be linearity score, Y-axis will be pruning score.
     Args:
         linearity_scores: A dictionary mapping layer names to linear scores.
         pruning_ratios: A dictionary mapping layer names to pruning scores.
         save_dir: The directory to save the scatterplot. Saved as "linearity_pruning_scatterplot.png" in the given directory.
+        linearity: The name of the linearity score type. To override linearity score in relation experiments being read as 'all'
     """
     layer_names = list(set(linearity_scores.keys()).intersection(set(pruning_ratios.keys())))
     logger.info(f"Computing scatterplot for {len(layer_names)} layers out of total {len(linearity_scores) + len(pruning_ratios)} layers.")
     linearity_values = [linearity_scores[name] for name in layer_names]
     pruning_values = [pruning_ratios[name] for name in layer_names] # Invert ratios to show the fraction of pruned weights
-    linearity_score = save_dir.split("/")[3]
+    linearity_score = save_dir.split("/")[3] if linearity is None else linearity
     prune_method = save_dir.split("/")[4]
     model_name = save_dir.split("/")[5]
     dataset = save_dir.split("/")[6]
@@ -262,14 +269,24 @@ def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios:
     plt.savefig(f"{save_dir}/scatterplot_{model_name}_{linearity_score}_{prune_method}_{dataset}.png")
     plt.close()
 
-def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, batch_size: int,
+def load_linearity_scores_from_disk(path: str):
+    filepath = str(glob.glob(path, recursive=True)[0]) # We just take the first instance
+    logger.info(f"Found save path {path}, attempting to load linearity scores from disk.")
+    linearity_scores = dict(json.load(open(filepath, "r")))
+
+    if "procrustes" in filepath and any(not (key[:-1].endswith("conv") or key.endswith("self_attn")) for key in linearity_scores.keys()):
+        linearity_scores = expand_scores_to_individual_layers(linearity_scores, "resnet" in filepath)
+
+    logger.info(f"Loaded linearity scores from disk: {linearity_scores}")
+    return linearity_scores
+
+def run_experiment(model: str, dataset: str, relation_to: str, batch_size: int,
                    epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str,
                    skip_finetune_path: Optional[str], pruning_ratio: float=0.1, blocks: Union[None, list]=None, hidden_layer_reduction: int=2):
     """Run the relation to other compression methods experiment.
     Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
     Args:
         model (str): The model architecture to use (e.g., 'resnet18', 'llama-3.2-1b').
-        linearity (str): The linearity metric to use (e.g., 'mean_preactivation', 'procrustes', or 'fraction').
         dataset (str): The dataset to use (e.g., 'imagenet').
         relation_to (str): The compression method identifier to compare against (e.g. 'magnitude_pruning', 'basic_kd')
         batch_size (int): The batch size for training and evaluation.
@@ -284,7 +301,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         blocks (Union[None, list]): The list of blocks to use for distilled resnet.
         hidden_layer_reduction (int): The number of hidden layers to remove for distilled llama.
     """
-    save_dir = "./results/rq2/" + linearity + "/" + relation_to + "/" + model + "/" + dataset + "/" + str(seed)
+    save_dir = "./results/rq2/all/" + relation_to + "/" + model + "/" + dataset + "/" + str(seed)
     os.makedirs(save_dir, exist_ok=True)
 
     # ------------------------------------------------------------
@@ -292,7 +309,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     # ------------------------------------------------------------
     if "resnet" in model:
         logger.info(
-            f"Running ResNet relation experiment with model={model}, linearity={linearity}, dataset={dataset}, relation_to={relation_to}, batch_size={batch_size}, epochs={epochs}, lr={lr}, data fraction: {data_fraction}, save={save}, seed={seed}, device={device}")
+            f"Running ResNet relation experiment with model={model}, dataset={dataset}, relation_to={relation_to}, batch_size={batch_size}, epochs={epochs}, lr={lr}, data fraction: {data_fraction}, save={save}, seed={seed}, device={device}")
         data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, data_fraction=data_fraction,
                                    seed=seed)
         logger.debug(
@@ -307,7 +324,7 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
             logger.info(f"Skipping saving finetuned model as it was loaded from disk. Loaded from {skip_finetune_path}.")
     elif "llama" in model:
         logger.info(
-            f"Running Llama compression experiment with model: {model}, linearity metric: {linearity}, dataset: {dataset}, relation_to={relation_to}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, data fraction: {data_fraction}, save results: {save}, seed: {seed}, device: {device}")
+            f"Running Llama relation experiment with model: {model}, dataset: {dataset}, relation_to={relation_to}, batch size: {batch_size}, epochs: {epochs}, learning rate: {lr}, data fraction: {data_fraction}, save results: {save}, seed: {seed}, device: {device}")
         data_handler = DataManager(dataset_name=dataset, batch_size=batch_size, data_fraction=data_fraction, model_name=model,
                                    seed=seed)
         logger.debug(
@@ -324,16 +341,11 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     logger.info("Model and data loaded, model fine-tuned.")
 
     # ------------------------------------------------------------
-    # Compute linearity scores
+    # Load linearity scores
     # ------------------------------------------------------------
-    # We hardcode threshold because we don't care about the split in this case
-    metric = LinearityMetric(linearity, model, data_handler, "50%", device, save, save_dir)
-    linearity_scores = metric.metric_fn(experimenter.model)
-    logger.info("Linearity scores computed.")
-    logger.debug(f"Linearity scores: {linearity_scores}")
-    linear_layers, nonlinear_layers = metric.thresholder(linearity_scores)
-    # We recombine the linear and nonlinear splits as we don't care
-    linearity_scores = {**linear_layers, **nonlinear_layers}
+    linearity_scores_fraction = load_linearity_scores_from_disk(f"./results/*/fraction/*/{experimenter.model_name}/{dataset}/{seed}/activation_fractions.json")
+    linearity_scores_mean_preactivation = load_linearity_scores_from_disk(f"./results/*/mean_preactivation/*/{experimenter.model_name}/{dataset}/{seed}/mean_preactivations.json")
+    linearity_scores_procrustes = load_linearity_scores_from_disk(f"./results/*/procrustes/*/{experimenter.model_name}/{dataset}/{seed}/procrustes_scores.json")
 
     # ------------------------------------------------------------
     # Evaluate initial model performance
@@ -448,7 +460,9 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
     teacher_layer_names = None
     student_layer_names = None
     if prune_dict is not None:
-        scatterplot_linearity_pruning_scores(linearity_scores, prune_dict, save_dir)
+        scatterplot_linearity_pruning_scores(linearity_scores_fraction, prune_dict, save_dir, "fraction")
+        scatterplot_linearity_pruning_scores(linearity_scores_mean_preactivation, prune_dict, save_dir, "mean_preactivation")
+        scatterplot_linearity_pruning_scores(linearity_scores_procrustes, prune_dict, save_dir, "procrustes")
         logger.info("Saved linearity vs pruning scatterplot.")
     if student_model is not None:
         data_loader = DataLoader(data_handler.val_set, batch_size=batch_size, shuffle=False,
@@ -460,7 +474,9 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         matrix, teacher_layer_names, student_layer_names = cka_similarity_matrix(experimenter.model, student_model,
                                                                                 data_loader, device=device,
                                                                                 tokenizer=data_handler.tokenizer if "llama" in model else None)
-        visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, student_layer_names, linearity_scores)
+        visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, student_layer_names, linearity_scores_fraction, "fraction")
+        visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, student_layer_names, linearity_scores_mean_preactivation, "mean_preactivation")
+        visualize_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, student_layer_names, linearity_scores_procrustes, "procrustes")
         logger.info("Saved cka similarity heatmap.")
 
     # ------------------------------------------------------------
@@ -470,9 +486,10 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
         "model": model,
         "dataset": dataset,
         "relation_to": relation_to,
-        "linearity": linearity,
         "seed": seed,
-        "linearity_scores": linearity_scores,
+        "linearity_scores_fraction": linearity_scores_fraction,
+        "linearity_scores_mean_preactivation": linearity_scores_mean_preactivation,
+        "linearity_scores_procrustes": linearity_scores_procrustes,
         "comp_accuracy": compressed_accuracy,
         "comp_param_count": compressed_param_count,
         "comp_inference_time": compressed_inference_time,
@@ -489,10 +506,6 @@ def run_experiment(model: str, linearity: str, dataset: str, relation_to: str, b
 
     if save:
         import json
-
-        # Save linearity scores
-        json.dump(linearity_scores, open(f"{save_dir}/linearity_scores.json", "w"), indent=4)
-        logger.info(f"Saved linearity scores to {save_dir}/linearity_scores.json")
 
         json.dump(wandb_logging_data, open(f"{save_dir}/wandb_logging_data.json", "w"), indent=4)
         logger.info(f"Saved wandb logging data to {save_dir}/wandb_logging_data.json")

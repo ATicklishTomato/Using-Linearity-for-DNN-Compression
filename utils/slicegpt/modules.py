@@ -21,6 +21,8 @@ class RMSN(torch.nn.Module):
         self.mean_dim = mean_dim
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if isinstance(x, tuple):
+            x = x[0]
         input_dtype = x.dtype
         if x.dtype == torch.float16:
             x = x.to(torch.float32)

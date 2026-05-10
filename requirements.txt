@@ -14,3 +14,5 @@ sentencepiece
 pandas
 pandas-stubs
 wandb
+ml-collections
+accelerate

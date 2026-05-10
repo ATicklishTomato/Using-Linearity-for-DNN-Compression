@@ -15,3 +15,5 @@ sentencepiece==0.2.1
 pandas==3.0.0
 pandas-stubs==3.0.0.260204
 wandb==0.24.2
+ml-collections
+accelerate

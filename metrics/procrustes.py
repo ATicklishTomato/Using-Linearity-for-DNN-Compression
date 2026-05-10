@@ -332,6 +332,9 @@ def procrustes_based_linearity(
 
         logger.info(f"{name}: {score:.6f}")
 
+
+    scores = expand_scores_to_individual_layers(scores, is_resnet)
+
     # --------------------------------------------------------
     # Save
     # --------------------------------------------------------
@@ -340,4 +343,4 @@ def procrustes_based_linearity(
         logger.info(f"Saved to {os.path.join(save_dir, 'procrustes_scores.json')}")
 
     logger.info("Finished block linearity computation.")
-    return expand_scores_to_individual_layers(scores, is_resnet)
+    return scores

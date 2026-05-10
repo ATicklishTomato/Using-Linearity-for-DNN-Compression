@@ -1,8 +1,8 @@
 
 
-path = "./rq2/*/slicegpt/*/*/*.bash"
-target = "mag"
-replace = "sli"
+path = "./*/procrustes/*/llama*/*/*.bash"
+target = "--mem=32G"
+replace = "--mem=64G"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path

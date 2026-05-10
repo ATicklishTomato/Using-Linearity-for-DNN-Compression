@@ -188,7 +188,7 @@ if __name__ == '__main__':
                            skip_finetune_path)
         case (_, 'relation'):
             from experiments.relation import run_experiment
-            run_experiment(args.model, args.linearity, args.dataset, args.relation, args.batch_size, args.epochs, args.lr,
+            run_experiment(args.model, args.dataset, args.relation, args.batch_size, args.epochs, args.lr,
                                           args.data_fraction, args.save, args.seed, args.device, skip_finetune_path)
         case (_, 'hybridization'):
             from experiments.hybridization import run_experiment
