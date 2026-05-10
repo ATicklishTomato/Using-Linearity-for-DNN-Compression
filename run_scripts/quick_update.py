@@ -1,8 +1,8 @@
 
 
-path = "./*/*/*/llama-3-3b/*/*.bash"
-target = "gpu_a100"
-replace = "gpu_h100"
+path = "./rq2/*/slicegpt/*/*/*.bash"
+target = "mag"
+replace = "sli"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path

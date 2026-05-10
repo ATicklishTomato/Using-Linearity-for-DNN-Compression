@@ -44,7 +44,7 @@ def parse_args():
                         default=['imagenet'], nargs='+',
                         help='Which dataset to aggregate results for')
     parser.add_argument('--relation_to', type=str, nargs='+',
-                        choices=['magnitude_pruning', 'basic_kd', 'hessian_pruning', 'taylor_pruning', 'feature_kd', 'born_again_kd'],
+                        choices=['magnitude_pruning', 'basic_kd', 'hessian_pruning', 'taylor_pruning', 'feature_kd', 'born_again_kd', 'slicegpt', 'wanda_pruning'],
                         default=['magnitude_pruning'], help='Which relation type to aggregate results for')
     parser.add_argument('--linearity', type=str, nargs='+',
                         choices=['mean_preactivation', 'procrustes', 'fraction'],
