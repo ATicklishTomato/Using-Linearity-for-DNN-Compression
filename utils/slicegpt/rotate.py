@@ -13,7 +13,10 @@ from .model_adapter import LayerAdapter, ModelAdapter
 from .model_utils import get_layer0_inputs, get_signals
 from .slicing_scheduler import ConfigSlicingScheduler, ConstSlicingScheduler, SlicingScheduler
 from .utils import cleanup_memory, map_tensors
+import logging
 
+logger = logging.getLogger(__name__)
+debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 def rotate_attention_inputs(layer_adapter: LayerAdapter, Q: torch.Tensor) -> None:
     # Rotate the WQ, WK and WV matrices of the self-attention layer.
@@ -175,7 +178,7 @@ def rotate_and_slice_sequential(
     slice_embeddings(model_adapter, slicing_scheduler.get_embedding_dimensions())
 
     logging.info("Rotate and slice layers")
-    for idx, layer_adapter in enumerate(tqdm(layers, unit="layer", desc="Rotating and slicing")):
+    for idx, layer_adapter in enumerate(tqdm(layers, unit="layer", desc="Rotating and slicing", leave=False, disable=debug_mode)):
         layer = layer_adapter.layer
         layer.attn_shortcut_Q = nn.Parameter(Q.T.clone().to(dtype=dtype))
 

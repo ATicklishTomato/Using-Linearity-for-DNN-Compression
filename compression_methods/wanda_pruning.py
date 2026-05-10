@@ -1,3 +1,4 @@
+import random
 from copy import deepcopy
 
 import torch
@@ -5,8 +6,6 @@ import logging
 from torch import nn
 
 from compression_methods.magnitude_pruning import finetune_llama, evaluate_llama
-from compression_methods.slicegpt import compute_before, generate_prune_dict
-from utils.slicegpt import data_utils
 
 """
 This code is a modification of code in the repo supporting the paper
@@ -14,7 +13,7 @@ A Simple and Effective Pruning Approach for Large Language Models
 Mingjie Sun*, Zhuang Liu*, Anna Bair, J. Zico Kolter (* indicates equal contribution)
 Carnegie Mellon University, Meta AI Research and Bosch Center for AI
 
-The original code is available at: https://github.com/locuslab/wanda (last accessed 11/03/2026)
+The original code is available at: https://github.com/locuslab/wanda (last accessed 10/05/2026)
 
 MIT License
 
@@ -121,19 +120,19 @@ def check_sparsity(model):
     model.config.use_cache = use_cache
     return float(count)/total_params
 
-def prepare_calibration_input(model, dataloader, device):
+def prepare_calibration_input(model, dataloader, device, seqlen):
     use_cache = model.config.use_cache
     model.config.use_cache = False
     layers = model.model.layers
 
     # dev = model.hf_device_map["model.embed_tokens"]
-    if "model.embed_tokens" in model.hf_device_map:
+    if hasattr(model, "hf_device_map") and "model.embed_tokens" in model.hf_device_map:
         device = model.hf_device_map["model.embed_tokens"]
 
     dtype = next(iter(model.parameters())).dtype
-    inps = torch.zeros((128, model.seqlen, model.config.hidden_size), dtype=dtype, device=device)
+    inps = torch.zeros((128, seqlen, model.config.hidden_size), dtype=dtype, device=device)
     inps.requires_grad = False
-    cache = {'i': 0, 'attention_mask': None, "position_ids": None}
+    cache = {'i': 0, 'attention_mask': None, "position_ids": None, 'position_embeddings': None}
 
     class Catcher(nn.Module):
         def __init__(self, module):
@@ -142,8 +141,9 @@ def prepare_calibration_input(model, dataloader, device):
         def forward(self, inp, **kwargs):
             inps[cache['i']] = inp
             cache['i'] += 1
-            cache['attention_mask'] = kwargs['attention_mask']
-            cache['position_ids'] = kwargs['position_ids']
+            cache['attention_mask'] = kwargs.get('attention_mask')
+            cache['position_ids'] = kwargs.get('position_ids')
+            cache['position_embeddings'] = kwargs.get('position_embeddings')
             raise ValueError
     layers[0] = Catcher(layers[0])
     for batch in dataloader:
@@ -156,9 +156,10 @@ def prepare_calibration_input(model, dataloader, device):
     outs = torch.zeros_like(inps)
     attention_mask = cache['attention_mask']
     position_ids = cache['position_ids']
+    position_embeddings = cache['position_embeddings']
     model.config.use_cache = use_cache
 
-    return inps, outs, attention_mask, position_ids
+    return inps, outs, attention_mask, position_ids, position_embeddings
 
 def return_given_alpha(alpha, sort_res, W_metric, tmp_metric, sum_before):
     thres_cumsum = sum_before * alpha
@@ -168,34 +169,55 @@ def return_given_alpha(alpha, sort_res, W_metric, tmp_metric, sum_before):
     cur_sparsity = (W_mask==True).sum() / W_mask.numel()
     return W_mask, cur_sparsity
 
+# Load and process wikitext2 dataset
+def get_loaders(traindata, testdata, nsamples, seed, seqlen, tokenizer):
+    # Encode datasets
+    trainenc = tokenizer(" ".join(traindata['text']), return_tensors='pt')
+    testenc = tokenizer("\n\n".join(testdata['text']), return_tensors='pt')
+
+    # Generate samples from training set
+    random.seed(seed)
+    trainloader = []
+    for _ in range(nsamples):
+        i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
+        j = i + seqlen
+        inp = trainenc.input_ids[:, i:j]
+        tar = inp.clone()
+        tar[:, :-1] = -100
+        trainloader.append((inp, tar))
+    return trainloader, testenc
 
 def prune_llama(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_batches=20,
-                semistructured=False, sparsity_ratio=0.5):
+                semistructured=True, sparsity_ratio=0.5):
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
     logger.info("loading calibdation data")
     # dataloader, _ = get_loaders("c4",nsamples=args.nsamples,seed=args.seed,seqlen=model.seqlen,tokenizer=tokenizer)
-    dataloader = data_utils.prepare_dataloader(
-        dataset=data_handler.train_set,
-        tokenizer=data_handler.tokenizer,
-        max_seqlen=512,
-        batch_size=data_handler.batch_size,
-        varied_seqlen=False,
-        seed=data_handler.seed,
-    )
+    dataloader, _ = get_loaders(data_handler.train_set, data_handler.val_set, nsamples=128, seed=data_handler.seed, seqlen=512, tokenizer=data_handler.tokenizer)
     logger.info("dataset loading complete")
     with torch.no_grad():
-        inps, outs, attention_mask, position_ids = prepare_calibration_input(model, dataloader, device)
+        inps, outs, attention_mask, position_ids, position_embeddings = prepare_calibration_input(model, dataloader, device, 512)
+
+    # helper so the layer call stays clean regardless of which kwargs are present
+    def layer_kwargs():
+        kw = {}
+        if attention_mask is not None:
+            kw['attention_mask'] = attention_mask
+        if position_ids is not None:
+            kw['position_ids'] = position_ids
+        if position_embeddings is not None:
+            kw['position_embeddings'] = position_embeddings
+        return kw
 
     layers = model.model.layers
     for i in range(len(layers)):
         layer = layers[i]
         subset = find_layers(layer)
 
-        if f"model.layers.{i}" in model.hf_device_map:   ## handle the case for llama-30B and llama-65B, when the device map has multiple GPUs;
+        if hasattr(model, 'hf_device_map') and  f"model.layers.{i}" in model.hf_device_map:   ## handle the case for llama-30B and llama-65B, when the device map has multiple GPUs;
             dev = model.hf_device_map[f"model.layers.{i}"]
-            inps, outs, attention_mask, position_ids = inps.to(dev), outs.to(dev), attention_mask.to(dev), position_ids.to(dev)
+            inps, outs, attention_mask, position_ids, position_embeddings = inps.to(dev), outs.to(dev), attention_mask.to(dev), position_ids.to(dev), position_embeddings.to(dev)
 
         wrapped_layers = {}
         for name in subset:
@@ -212,12 +234,12 @@ def prune_llama(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_ba
             handles.append(subset[name].register_forward_hook(add_batch(name)))
         for j in range(num_batches):
             with torch.no_grad():
-                outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
+                outs[j] = layer(inps[j].unsqueeze(0), **layer_kwargs())[0]
         for h in handles:
             h.remove()
 
         for name in subset:
-            logger.debug(f"pruning layer {i} name {name}")
+            logger.info(f"pruning layer {i} name {name}")
             W_metric = torch.abs(subset[name].weight.data) * torch.sqrt(wrapped_layers[name].scaler_row.reshape((1,-1)))
 
             W_mask = (torch.zeros_like(W_metric) == 1)  ## initialize a mask to be all False
@@ -248,7 +270,7 @@ def prune_llama(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_ba
 
                         alpha = alpha_new
                         W_mask, cur_sparsity = return_given_alpha(alpha, sort_res, W_metric, tmp_metric, sum_before)
-                    logger.debug(f"alpha found {alpha} sparsity {cur_sparsity:.6f}")
+                    logger.info(f"alpha found {alpha} sparsity {cur_sparsity:.6f}")
                 else:
                     # unstructured pruning
                     indices = sort_res[1][:,:int(W_metric.shape[1]*sparsity_ratio)]
@@ -258,11 +280,32 @@ def prune_llama(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_ba
 
         for j in range(num_batches):
             with torch.no_grad():
-                outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
+                outs[j] = layer(inps[j].unsqueeze(0), **layer_kwargs())[0]
         inps, outs = outs, inps
 
     model.config.use_cache = use_cache
     torch.cuda.empty_cache()
+
+    return model
+
+
+def generate_prune_dict(model):
+    layers = model.model.layers
+    prune_dict = {}
+    for i, layer in enumerate(layers):
+        attn = layer.self_attn
+
+        # --- Attention sparsity ---
+        attn_weights = [
+            w.weight.data for w in [attn.q_proj, attn.k_proj, attn.v_proj, attn.o_proj]
+            if hasattr(w, "weight")
+        ]
+        attn_zeros = sum((w == 0).sum().item() for w in attn_weights)
+        attn_total = sum(w.numel() for w in attn_weights)
+        prune_dict[f"model.layers.{i}.self_attn"] = attn_zeros / attn_total
+
+    logger.info(f"Prune dict: {prune_dict}")
+    return prune_dict
 
 def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5, batch_size=64, epochs=10):
     """
@@ -286,9 +329,8 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5,
     logger.info(f"Made copy of model: {model}")
 
     logger.info("Running Llama pruning")
-    layer_sizes_before = compute_before(model)
-    pruned_model = prune_llama(model, data_handler, device=device, sparsity_ratio=pruning_ratio)
-    prune_dict = generate_prune_dict(pruned_model, layer_sizes_before)
+    model = prune_llama(model, data_handler, device=device, sparsity_ratio=pruning_ratio)
+    prune_dict = generate_prune_dict(model)
     logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
     finetune_llama(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device)
     acc, param_count, inference_time, gflops = evaluate_llama(model, data_handler)

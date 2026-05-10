@@ -13,22 +13,17 @@ def compute_before(model):
     layers = model.model.layers
     layer_sizes = {}
     for i, layer in enumerate(layers):
-        if layer is model.lm_head:
-            # Leave final fc alone
-            continue
-        mlp = layer.mlp
+        attn = layer.self_attn
 
-        gate = mlp.gate_proj if hasattr(mlp, "gate_proj") else mlp.gate_up_proj
-        up = mlp.up_proj
-        down = mlp.down_proj
+        # --- Attention sparsity ---
+        attn_weights = [
+            w.weight.data for w in [attn.q_proj, attn.k_proj, attn.v_proj, attn.o_proj]
+            if hasattr(w, "weight")
+        ]
 
-        before = (
-                gate.weight.numel()
-                + up.weight.numel()
-                + down.weight.numel()
-        )
+        attn_total = sum(w.numel() for w in attn_weights)
 
-        layer_sizes[f"model.layers.{i}.self_attn"] = before
+        layer_sizes[f"model.layers.{i}.self_attn"] = attn_total
 
     return layer_sizes
 
@@ -36,22 +31,19 @@ def generate_prune_dict(model, before_sizes):
     layers = model.model.layers
     prune_dict = {}
     for i, layer in enumerate(layers):
-        if layer is model.lm_head:
-            # Leave final fc alone
-            continue
-        mlp = layer.mlp
+        attn = layer.self_attn
 
-        gate = mlp.gate_proj if hasattr(mlp, "gate_proj") else mlp.gate_up_proj
-        up = mlp.up_proj
-        down = mlp.down_proj
+        # --- Attention sparsity ---
+        attn_weights = [
+            w.weight.data for w in [attn.q_proj, attn.k_proj, attn.v_proj, attn.o_proj]
+            if hasattr(w, "weight")
+        ]
 
-        after = (
-                gate.weight.numel()
-                + up.weight.numel()
-                + down.weight.numel()
-        )
+        attn_total = sum(w.numel() for w in attn_weights)
 
-        prune_dict[f"model.layers.{i}.self_attn"] = 1 - (after / before_sizes[f"model.layers.{i}.self_attn"])
+        prune_dict[f"model.layers.{i}.self_attn"] = 1 - (attn_total / before_sizes[f"model.layers.{i}.self_attn"])
+
+    logger.info(f"Prune dict: {prune_dict}")
 
     return prune_dict
 
@@ -79,7 +71,6 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5,
     logger.info("Running Llama pruning")
     layer_sizes_before = compute_before(model)
     model = run_slicegpt(model, data_handler, sparsity=pruning_ratio, device=device)
-    torch.cuda.empty_cache()
     prune_dict = generate_prune_dict(model, layer_sizes_before)
     logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
     finetune_llama(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device)
@@ -114,17 +105,17 @@ def run_slicegpt(
             model.lm_head.weight.clone()
         )
 
-    print("Replacing layers...")
+    logger.info("Replacing layers...")
     layernorm_fusion.replace_layers(model_adapter)  # <-- missing
 
     # Attach rotary_emb to each layer so forward can recompute position embeddings
     for layer in model.model.layers:
         layer.rotary_emb = model.model.rotary_emb
 
-    print("Fusing LayerNorms...")
+    logger.info("Fusing LayerNorms...")
     layernorm_fusion.fuse_modules(model_adapter)
 
-    print("Loading calibration data...")
+    logger.info("Loading calibration data...")
     train_loader = data_utils.prepare_dataloader(
         dataset=data_handler.train_set,
         tokenizer=data_handler.tokenizer,
@@ -136,10 +127,10 @@ def run_slicegpt(
     )
 
     # Step 4: rotate and slice in one pass
-    print(f"Rotating and slicing at sparsity={sparsity}...")
+    logger.info(f"Rotating and slicing at sparsity={sparsity}...")
     scheduler = ConstSlicingScheduler(int(model_adapter.hidden_size * (1 - sparsity)))
     rotate.rotate_and_slice(model_adapter, train_loader, scheduler)
 
-    print(f"Done. Hidden dim: {model.config.hidden_size} -> {model_adapter.hidden_size}")
+    logger.info(f"Done. Hidden dim: {model.config.hidden_size} -> {model_adapter.hidden_size}")
 
     return model_adapter.model
