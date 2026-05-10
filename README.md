@@ -1,7 +1,6 @@
-# Thesis Experiments Repository
+# Utilizing Inherent Linearity in Deep Neural Networks for Model Compression
 
-This repository encompasses experimental code for my thesis on linearity in CNNs and transformers. 
-It will eventually contain all experiments and related artifacts.
+This repository encompasses experimental code for my thesis on linearity in CNNs and transformers.
 
 ## Repository layout
 
@@ -16,6 +15,11 @@ It will eventually contain all experiments and related artifacts.
 - `notebook_experiments/` \- Jupyter notebooks with initial exploratory experiments
 - `run_scripts/` \- run scripts for Slurm-based execution
 - `requirements.txt` \- Python dependencies
+- `requirements_snellius.txt` \- Python dependencies for running on Snellius (due to preinstalled dependencies with specific versions)
+
+What you should add yourself:
+- `hf.login` \- file containing Hugging Face token for downloading models and datasets
+- `wandb.login` \- file containing W&B API key for logging experiments to Weights & Biases
 
 ## Requirements
 Use a virtual environment or conda environment to avoid conflicts with other projects. Python 3.11 or higher is recommended.
@@ -27,10 +31,6 @@ pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https
 pip install -r requirements.txt
 ```
 Installing torch separately before the requirements tends to avoid issues with torch+cuda versioning inside the requirements file.
-
-Place your credentials in the root files:
-- Put Hugging Face token in `hf.login`
-- Put W&B key in `wandb.login`
 
 ## Usage
 
@@ -57,25 +57,26 @@ Then navigate to the `notebook_experiments/` directory and open the desired note
 To run an experiment, use the command line interface of `main.py`. This script allows you to specify the model, dataset, linearity metric, and type of experiment you want to run, as well as various training hyperparameters and logging options.
 
 ```bash
-usage: main.py [-h] [-m {resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b}] [-l {mean_preactivation,procrustes,fraction}] [-d {imagenet,tinystories,cifar10}]
-               [-e {relation,compression,benchmark_compression}] [--relation {magnitude_pruning,basic_kd}] [-t THRESHOLD] [--batch_size BATCH_SIZE] [--epochs EPOCHS] [--lr LR] [--data_fraction DATA_FRACTION] [--seed SEED]
-               [--device DEVICE] [--verbose] [--save] [--wandb_project WANDB_PROJECT] [--wandb_tags [WANDB_TAGS ...]]
+usage: main.py [-h] [-m {resnet18,resnet34,resnet50,llama-2-7b,llama-3-1b,llama-3-3b}] [-l {mean_preactivation,procrustes,fraction}] [-d {imagenet,tinystories,cifar10,superglue}]
+               [-e {relation,compression,linear_approximator_compression,benchmark_compression,hybridization}]
+               [--relation {magnitude_pruning,basic_kd,hessian_pruning,taylor_pruning,feature_kd,born_again_kd,slicegpt,wanda_pruning}] [-t THRESHOLD] [--batch_size BATCH_SIZE] [--epochs EPOCHS] [--lr LR]
+               [--data_fraction DATA_FRACTION] [--seed SEED] [--device DEVICE] [--verbose] [--save] [--skip_finetune] [--wandb_project WANDB_PROJECT] [--wandb_tags [WANDB_TAGS ...]]
 
 Execute experiments on inherent linearity in ResNets and Llamas.
 
 options:
   -h, --help            show this help message and exit
-  -m {resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b}, --model {resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b}
+  -m {resnet18,resnet34,resnet50,llama-2-7b,llama-3-1b,llama-3-3b}, --model {resnet18,resnet34,resnet50,llama-2-7b,llama-3-1b,llama-3-3b}
                         Model architecture to use for the experiment.
   -l {mean_preactivation,procrustes,fraction}, --linearity {mean_preactivation,procrustes,fraction}
                         Linearity metric to use. `mean_preactivation` refers to the mean of preactivations as defined by Pinson et al. (2024). `procrustes` refers to the Procrustes similarity-based metric as defined by
                         Razzhigaev et al (2024). `fraction` refers to the fraction of neurons that is activated by an activation function.
-  -d {imagenet,tinystories,cifar10}, --dataset {imagenet,tinystories,cifar10}
+  -d {imagenet,tinystories,cifar10,superglue}, --dataset {imagenet,tinystories,cifar10,superglue}
                         Dataset to use for training and evaluation.
-  -e {relation,compression,benchmark_compression}, --experiment {relation,compression,benchmark_compression}
-                        The type of experiment to run. "relation" tests the relation between inherent linearity and another compression method. "compression" tests inherent linearity as a tool for compression.
-                        "benchmark_compression" runs other compression methods to allow a comparison.
-  --relation {magnitude_pruning,basic_kd}
+  -e {relation,compression,linear_approximator_compression,benchmark_compression,hybridization}, --experiment {relation,compression,linear_approximator_compression,benchmark_compression,hybridization}
+                        The type of experiment to run. "relation" tests the relation between inherent linearity and another compression method. "compression" tests layer merging for ResNets or linear approximation for Llama.
+                        "linear_approximator_compression" tests linear approximation for ResNets. "benchmark_compression" runs other compression methods to allow a comparison.
+  --relation {magnitude_pruning,basic_kd,hessian_pruning,taylor_pruning,feature_kd,born_again_kd,slicegpt,wanda_pruning}
                         The relation experiment to run. Only applicable if experiment type is "relation". Ignored otherwise.
   -t THRESHOLD, --threshold THRESHOLD
                         The threshold to use for determining what is(n\'t) linear. To take a percentile, enter a percentage, e.g. '75%' to consider anything smaller the 75th percentile as non-linear. To take a hard threshold,
@@ -85,11 +86,12 @@ options:
   --epochs EPOCHS       Number of epochs for training and fine-tuning.
   --lr LR               Learning rate for optimizer.
   --data_fraction DATA_FRACTION
-                        Fraction of data to use for training and evaluation. If None, default fractions are:- imagenet: 0.1- tinystories: 0.01- cifar10: 1.0
+                        Fraction of data to use for training and evaluation. If None, default fractions are:- imagenet: 0.1- tinystories: 0.001- cifar10: 1.0- superglue: 0.1
   --seed SEED           Random seed for reproducibility.
   --device DEVICE       Device to run the experiments on (e.g., "cpu", "cuda").
   --verbose             Enable verbose logging.
   --save                Save the trained models and results to ./results directory.
+  --skip_finetune       Set this flag in order to attempt finetune skipping. Instead, the Experimenter class will attempt to load a finetuned model from the results directory that matches the model, dataset, and random seed
   --wandb_project WANDB_PROJECT
                         Weights & Biases project name for logging.
   --wandb_tags [WANDB_TAGS ...]
@@ -158,22 +160,25 @@ options:
 A separate script allows for the summarizing of results from different random seeds. Results are grabbed from the `results/` directory and averaged across seeds, then visualized using matplotlib and written to a LaTeX table. See `visualize.py` for details.
 
 ```bash
-usage: visualize.py [-h] [--rq {rq1,rq2,benchmark}] [--threshold THRESHOLD] [--model {resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b}] [--dataset {imagenet,tinystories,cifar10}]
-                    [--relation_to {magnitude_pruning,basic_kd}] [--linearity {mean_preactivation,procrustes,fraction}]
+usage: visualize.py [-h] [--rq {rq1,rq2,benchmark} [{rq1,rq2,benchmark} ...]] [--threshold THRESHOLD [THRESHOLD ...]]
+                    [--model {resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b} [{resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b} ...]]
+                    [--dataset {imagenet,tinystories,cifar10,superglue} [{imagenet,tinystories,cifar10,superglue} ...]]
+                    [--relation_to {magnitude_pruning,basic_kd,hessian_pruning,taylor_pruning,feature_kd,born_again_kd,slicegpt,wanda_pruning} [{magnitude_pruning,basic_kd,hessian_pruning,taylor_pruning,feature_kd,born_again_kd,slicegpt,wanda_pruning} ...]]
+                    [--linearity {mean_preactivation,procrustes,fraction} [{mean_preactivation,procrustes,fraction} ...]]
 
 options:
   -h, --help            show this help message and exit
-  --rq {rq1,rq2,benchmark}
+  --rq {rq1,rq2,benchmark} [{rq1,rq2,benchmark} ...]
                         Which Research Question to aggregate results for
-  --threshold THRESHOLD
+  --threshold THRESHOLD [THRESHOLD ...]
                         Threshold to aggregate results for
-  --model {resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b}
+  --model {resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b} [{resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b} ...]
                         Which model to aggregate results for
-  --dataset {imagenet,tinystories,cifar10}
+  --dataset {imagenet,tinystories,cifar10,superglue} [{imagenet,tinystories,cifar10,superglue} ...]
                         Which dataset to aggregate results for
-  --relation_to {magnitude_pruning,basic_kd}
+  --relation_to {magnitude_pruning,basic_kd,hessian_pruning,taylor_pruning,feature_kd,born_again_kd,slicegpt,wanda_pruning} [{magnitude_pruning,basic_kd,hessian_pruning,taylor_pruning,feature_kd,born_again_kd,slicegpt,wanda_pruning} ...]
                         Which relation type to aggregate results for
-  --linearity {mean_preactivation,procrustes,fraction}
+  --linearity {mean_preactivation,procrustes,fraction} [{mean_preactivation,procrustes,fraction} ...]
                         Linearity metric to use. `mean_preactivation` refers to the mean of preactivations as defined by Pinson et al. (2024). `procrustes` refers to the Procrustes similarity-based metric as defined by
                         Razzhigaev et al (2024). `fraction` refers to the fraction of neurons that is activated by an activation function.
 ```
@@ -182,6 +187,8 @@ options:
 
 I would like to express my thanks to my thesis supervisor, Dr. Hannah Pinson, for her guidance and input throughout the project.
 I'd also like to thank everyone in the thesis group of Dr. Pinson for the feedback they gave during our meetings, as well as the pleasant atmosphere at the meetings.
+My appreciation goes out to the authors of the papers on which this thesis is based, Pinson et al. (2024) and Razzhigaev et al. (2024), for their groundbreaking work on inherent linearity in neural networks, which served as the foundation for this thesis. Without their work, I couldn't even have started.
+A special thanks to Bram van Berlo, who provided key insights into optimizing and streamlining my code.
 
 ## License
 Copyright 2026 Luuk Wubben
