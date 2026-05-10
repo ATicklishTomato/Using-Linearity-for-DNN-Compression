@@ -443,6 +443,7 @@ def run_experiment(model: str, dataset: str, relation_to: str, batch_size: int,
 
     logger.info(f"Compressed model evaluated with accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, "
                 f"inference time: {compressed_inference_time:.4f} seconds, gflops: {compressed_gflops}")
+
     # ------------------------------------------------------------
     # Evaluate compressed model performance
     # ------------------------------------------------------------
