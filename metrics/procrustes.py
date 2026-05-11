@@ -3,6 +3,7 @@ import re
 import json
 import logging
 from collections import defaultdict
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -140,20 +141,25 @@ def compute_linearity_score(X, Y):
     score = 1.0 - error.item()
     return score
 
-def expand_scores_to_individual_layers(scores, is_resnet):
+def expand_scores_to_individual_layers(scores, is_resnet, conv_names: Optional[list]=None):
     """The scores we get are for blocks. The broader experimental code looks at individual layers.
     This function adapts the labels to reference the individual layers.
     Args:
         scores: dict[block_name, score] The original scores for each block.
         is_resnet: bool Indication whether the scores are for resnet
+        conv_names (list): A list of strings that consists of the names of all conv layers (excl downsample) retrieved from model.named_modules()
     Returns:
         dict[layer_name, score] New dict with scores for each layer in the block, copied from the block
     """
     new_scores = {}
     for block_name, score in scores.items():
-        if is_resnet:
+        if is_resnet and conv_names is None:
             new_scores[block_name + ".conv1"] = score
             new_scores[block_name + ".conv2"] = score
+        elif is_resnet and conv_names is not None:
+            for conv_name in conv_names:
+                if conv_name.startswith(block_name):
+                    new_scores[conv_name] = score
         else:
             new_scores[block_name + ".self_attn"] = score
 
@@ -332,8 +338,11 @@ def procrustes_based_linearity(
 
         logger.info(f"{name}: {score:.6f}")
 
+    conv_names = None
+    if is_resnet:
+        conv_names = [name for name, module in model.named_modules() if isinstance(module, torch.nn.Conv2d) and "downsample" not in name]
 
-    scores = expand_scores_to_individual_layers(scores, is_resnet)
+    scores = expand_scores_to_individual_layers(scores, is_resnet, conv_names)
 
     # --------------------------------------------------------
     # Save

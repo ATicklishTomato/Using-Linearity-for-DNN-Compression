@@ -235,13 +235,13 @@ if __name__ == '__main__':
                         avg_linearity_scores, avg_pruning_ratios = avg_rq2_prune_scores(path)
                         print("Average Linearity Scores example:", list(avg_linearity_scores.items())[:5])
                         print("Average Pruning Ratios example:", list(avg_pruning_ratios.items())[:5])
-                        scatterplot_linearity_pruning_scores(avg_linearity_scores, avg_pruning_ratios, path)
+                        scatterplot_linearity_pruning_scores(avg_linearity_scores, avg_pruning_ratios, path, linearity=linearity)
                     elif relation_to == 'basic_kd':
                         avg_matrix = avg_rq2_matrix_values(path)
                         avg_linearity_scores, student_layer_names, teacher_layer_names = avg_rq2_linearity_scores(path)
                         print("Average Linearity Scores example:", list(avg_linearity_scores.items())[:5])
                         visualize_cka_similarity_matrix(avg_matrix, path, teacher_layer_names, student_layer_names,
-                                                        avg_linearity_scores)
+                                                        avg_linearity_scores, linearity=linearity)
                     else:
                         raise NotImplementedError
                 case 'benchmark':

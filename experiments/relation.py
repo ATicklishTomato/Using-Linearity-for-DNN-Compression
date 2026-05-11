@@ -269,13 +269,13 @@ def scatterplot_linearity_pruning_scores(linearity_scores: dict, pruning_ratios:
     plt.savefig(f"{save_dir}/scatterplot_{model_name}_{linearity_score}_{prune_method}_{dataset}.png")
     plt.close()
 
-def load_linearity_scores_from_disk(path: str):
+def load_linearity_scores_from_disk(path: str, conv_names: Optional[list] = None):
     filepath = str(glob.glob(path, recursive=True)[0]) # We just take the first instance
     logger.info(f"Found save path {path}, attempting to load linearity scores from disk.")
     linearity_scores = dict(json.load(open(filepath, "r")))
 
     if "procrustes" in filepath and any(not (key[:-1].endswith("conv") or key.endswith("self_attn")) for key in linearity_scores.keys()):
-        linearity_scores = expand_scores_to_individual_layers(linearity_scores, "resnet" in filepath)
+        linearity_scores = expand_scores_to_individual_layers(linearity_scores, "resnet" in filepath, conv_names)
 
     logger.info(f"Loaded linearity scores from disk: {linearity_scores}")
     return linearity_scores
@@ -343,9 +343,14 @@ def run_experiment(model: str, dataset: str, relation_to: str, batch_size: int,
     # ------------------------------------------------------------
     # Load linearity scores
     # ------------------------------------------------------------
+    conv_names = None
+    if "resnet" in experimenter.model:
+        conv_names = [name for name, module in experimenter.model.named_modules() if
+                      isinstance(module, torch.nn.Conv2d) and "downsample" not in name]
+
     linearity_scores_fraction = load_linearity_scores_from_disk(f"./results/*/fraction/*/{experimenter.model_name}/{dataset}/{seed}/activation_fractions.json")
     linearity_scores_mean_preactivation = load_linearity_scores_from_disk(f"./results/*/mean_preactivation/*/{experimenter.model_name}/{dataset}/{seed}/mean_preactivations.json")
-    linearity_scores_procrustes = load_linearity_scores_from_disk(f"./results/*/procrustes/*/{experimenter.model_name}/{dataset}/{seed}/procrustes_scores.json")
+    linearity_scores_procrustes = load_linearity_scores_from_disk(f"./results/*/procrustes/*/{experimenter.model_name}/{dataset}/{seed}/procrustes_scores.json", conv_names=conv_names)
 
     # ------------------------------------------------------------
     # Evaluate initial model performance

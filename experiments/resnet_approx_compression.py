@@ -216,7 +216,7 @@ def get_block_input_output(model, model_input, layer_group, device="cuda") -> Tu
 
 def train_block_approximation(
     model,
-    layer_group,
+    layer_groups,
     train_dataset,
     device,
     epochs=1,
@@ -227,7 +227,7 @@ def train_block_approximation(
     Trains a linear approximation layer to mimic a section of a LLama model's attention blocks.
     Args:
         model: The LLaMA model to modify.
-        layer_group: A list of layer indices that form a contiguous block to replace.
+        layer_groups: A list of lists of layer indices that form a contiguous block to replace.
         train_dataset: The training dataset.
         device: The device to use.
         epochs: The number of epochs to train.
@@ -244,42 +244,47 @@ def train_block_approximation(
                               )
     model.eval().to(device)
 
+    approximators = []
+
     # Get input size of first layer in group and output of last layer in group
     single_data_point = next(iter(train_loader))[0].to(device) # Get a single data point to determine input and output sizes for the linear block
-    x, y_teacher = get_block_input_output(model, single_data_point, layer_group, device=device)
-    in_shape = x.shape
-    out_shape = y_teacher.shape
-    logger.debug(f"Training block approximation for layer group {layer_group} with input size {in_shape} and output size {out_shape}")
+    for layer_group in layer_groups:
+        x, y_teacher = get_block_input_output(model, single_data_point, layer_group, device=device)
+        in_shape = x.shape
+        out_shape = y_teacher.shape
+        logger.debug(f"Training block approximation for layer group {layer_group} with input size {in_shape} and output size {out_shape}")
 
-    approx = LinearConvolutionalBlock(in_shape, out_shape).to(device)
-    approx.train().to(device)
+        approx = LinearConvolutionalBlock(in_shape, out_shape).to(device)
+        approx.train().to(device)
+        optimizer = torch.optim.AdamW(approx.parameters(), lr=lr)
+        approximators.append((approx, layer_group, optimizer))
 
-    optimizer = torch.optim.AdamW(approx.parameters(), lr=lr)
+    logger.info("Initialized linear approximations")
+
     loss_fn = torch.nn.MSELoss()
-    scaler = torch.amp.GradScaler(device)
-
 
     for epoch in range(epochs):
-        for i, data in tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training block {layer_group} Epoch {epoch+1}", leave=False, disable=debug_mode):
+        for i, data in tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training layer groups Epoch {epoch+1}", leave=False, disable=debug_mode):
 
             inputs, _ = data
             inputs = inputs.to(device)
+            layer_group = ""
+            loss = 0
+            for approx, layer_group, optimizer in approximators:
+                x, y_teacher = get_block_input_output(model, inputs, layer_group, device=device)
 
-            x, y_teacher = get_block_input_output(model, inputs, layer_group, device=device)
+                y_student = approx(x)
+                logger.debug(f"y_student shape: {y_student.shape}, y_teacher shape: {y_teacher.shape}")
+                logger.debug(f"y_student NaN: {torch.any(torch.isnan(y_student))}, y_teacher NaN: {torch.any(torch.isnan(y_teacher))}")
+                loss = loss_fn(y_student, y_teacher)
 
-            y_student = approx(x)
-            logger.debug(f"y_student shape: {y_student.shape}, y_teacher shape: {y_teacher.shape}")
-            logger.debug(f"y_student NaN: {torch.any(torch.isnan(y_student))}, y_teacher NaN: {torch.any(torch.isnan(y_teacher))}")
-            loss = loss_fn(y_student, y_teacher)
+                optimizer.zero_grad()
 
-            optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            logger.info(f"Block {layer_group} | Epoch {epoch} | Loss {loss.item():.6f}")
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-
-        logger.info(f"Block {layer_group} | Epoch {epoch} | Loss {loss.item():.6f}")
-    return approx
+    return [(approx, layer_group) for approx, layer_group, _ in approximators]
 
 def train_approximation_layers(experimenter, data_handler, groups,
                                epochs: int, lr: float, batch_size:int, device: str):
@@ -294,21 +299,17 @@ def train_approximation_layers(experimenter, data_handler, groups,
     Returns:
         The compressed model with linear approximations.
     """
-    replacements = []
-    for layer_group in groups:
-        logger.info(f"Training approximation for layer group: {layer_group}")
-        linear_block = train_block_approximation(
-            experimenter.model,
-            layer_group,
-            data_handler.train_set,
-            device,
-            epochs=epochs,
-            lr=lr,
-            batch_size=batch_size
-        )
-        replacements.append((experimenter.model, layer_group, linear_block))
-    for replacement in replacements:
-        replace_attention_block(*replacement)
+    replacements = train_block_approximation(
+        experimenter.model,
+        groups,
+        data_handler.train_set,
+        device,
+        epochs=epochs,
+        lr=lr,
+        batch_size=batch_size
+    )
+    for approx, layer_group in replacements:
+        replace_attention_block(experimenter.model, layer_group, approx)
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
                    epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str,

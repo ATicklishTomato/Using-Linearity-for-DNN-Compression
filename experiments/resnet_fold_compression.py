@@ -14,219 +14,177 @@ import utils.util_functions as utils
 
 logger = logging.getLogger(__name__)
 
-def merge_linear_conv_sequences(
-    model,
-    linear_layers,
-    device='cuda'
-):
+def merge_bn_into_conv(conv, bn):
     """
-    Merge Conv-BN-ReLU-Conv sequences when the activation is near-linear.
-
+    Merge a batchnorm layer into its own conv layer by applying its scaling and shifting to the conv weights and biases.
+    This effectively removes the batchnorm layer while preserving the same transformations.
     Args:
-        model (nn.Module): ResNet-like model (unchanged architecture)
-        linear_layers (dict): {conv_layer_name: linearity_score}
-        device (str): Device to perform merging on (e.g., 'cpu', 'cuda')
-
+        conv (nn.Conv2d): Convolutional layer
+        bn (nn.BatchNorm2d): Batchnorm layer
     Returns:
-        merged_model (nn.Module)
-        merged_pairs (list of tuples)
+        None. Convolutional layer is modified in place
     """
+    logger.debug(f"Merging BatchNorm into Conv ({conv.out_channels} channels)")
+
+    W = conv.weight
+    if conv.bias is None:
+        bias = torch.zeros(W.size(0), device=W.device)
+    else:
+        bias = conv.bias
+
+    gamma = bn.weight
+    beta = bn.bias
+    mean = bn.running_mean
+    var = bn.running_var
+    eps = bn.eps
+
+    std = torch.sqrt(var + eps)
+    W_merged = W * (gamma / std).reshape(-1, 1, 1, 1)
+    b_merged = beta + (bias - mean) * gamma / std
+
+    conv.weight.data.copy_(W_merged)
+    conv.bias = nn.Parameter(b_merged)
+
+
+def merge_convs(conv1, conv2):
+    """
+    Merges to convolutional layers into each other, creating one big convolutional layer that performs the same transformations as the two in direct sequence.
+    Args:
+        conv1 (nn.Conv2d): Convolutional layer
+        conv2 (nn.Conv2d): Convolutional layer
+    Returns:
+        new_conv (nn.Conv2d): New convolutional layer that performs the same transformations.
+    """
+    logger.debug(
+        f"Merging Conv layers: "
+        f"{conv1.in_channels}→{conv1.out_channels}→{conv2.out_channels}"
+    )
+
+    W1 = conv1.weight.detach()  # [C_mid, C_in, k1, k1]
+    W2 = conv2.weight.detach()  # [C_out, C_mid, k2, k2]
+
+    C_mid, C_in, k1, _ = W1.shape
+    C_out, C_mid2, k2, _ = W2.shape
+
+    k_merge = k1 + k2 - 1
+
+    # ---------------------------------------------------------
+    # Flip W2 because conv2d does cross-correlation
+    # Need true kernel convolution for composition
+    # ---------------------------------------------------------
+    W2_flip = torch.flip(W2, dims=(-1, -2))
+
+    # ---------------------------------------------------------
+    # Vectorized kernel composition
+    #
+    # Treat each (out_channel, mid_channel) kernel in W2 as a
+    # conv filter applied to all matching W1[mid_channel, in_channel]
+    # ---------------------------------------------------------
+    W_merge = torch.zeros(
+        (C_out, C_in, k_merge, k_merge),
+        device=W1.device,
+        dtype=W1.dtype,
+    )
+
+    # Process each intermediate channel j
+    for j in range(C_mid):
+        # Input kernels from conv1:
+        # [C_in, 1, k1, k1]
+        x = W1[j].unsqueeze(1)
+
+        # Filters from conv2:
+        # [C_out, 1, k2, k2]
+        w = W2_flip[:, j].unsqueeze(1)
+
+        # Apply all output filters to all input kernels
+        # output: [C_in, C_out, k_merge, k_merge]
+        out = F.conv2d(
+            x,
+            w,
+            padding=k2 - 1
+        )
+
+        # Rearrange to [C_out, C_in, k_merge, k_merge]
+        out = out.permute(1, 0, 2, 3)
+
+        W_merge += out
+
+    # ---------------------------------------------------------
+    # Build merged conv
+    # ---------------------------------------------------------
+    new_conv = nn.Conv2d(
+        in_channels=C_in,
+        out_channels=C_out,
+        kernel_size=k_merge,
+        padding=k_merge // 2,
+        bias=False,
+    ).to(W1.device)
+    new_conv.weight.data.copy_(W_merge)
+
+    return new_conv
+
+def merge_linear_conv_sequences(model, linear_layers, device='cuda'):
     merged_pairs = []
     model.to(device)
 
-    logger.info("\n[Layer Merging] Starting merging pass")
-
-    # ------------------------------------------------------------
-    # Helper: merge BN into Conv
-    # ------------------------------------------------------------
-    def merge_bn_into_conv(conv, bn):
-        """
-        Merge a batchnorm layer into its own conv layer by applying its scaling and shifting to the conv weights and biases.
-        This effectively removes the batchnorm layer while preserving the same transformations.
-        Args:
-            conv (nn.Conv2d): Convolutional layer
-            bn (nn.BatchNorm2d): Batchnorm layer
-        Returns:
-            None. Convolutional layer is modified in place
-        """
-        logger.debug(f"    Mergeing BatchNorm into Conv ({conv.out_channels} channels)")
-
-        W = conv.weight
-        if conv.bias is None:
-            bias = torch.zeros(W.size(0), device=W.device)
-        else:
-            bias = conv.bias
-
-        gamma = bn.weight
-        beta = bn.bias
-        mean = bn.running_mean
-        var = bn.running_var
-        eps = bn.eps
-
-        std = torch.sqrt(var + eps)
-        W_merged = W * (gamma / std).reshape(-1, 1, 1, 1)
-        b_merged = beta + (bias - mean) * gamma / std
-
-        conv.weight.data.copy_(W_merged)
-        conv.bias = nn.Parameter(b_merged)
-
-    # ------------------------------------------------------------
-    # Helper: merge Conv → Conv
-    # ------------------------------------------------------------
-    def merge_convs(conv1, conv2):
-        """
-        Merges to convolutional layers into each other, creating one big convolutional layer that performs the same transformations as the two in direct sequence.
-        Args:
-            conv1 (nn.Conv2d): Convolutional layer
-            conv2 (nn.Conv2d): Convolutional layer
-        Returns:
-            new_conv (nn.Conv2d): New convolutional layer that performs the same transformations.
-        """
-        logger.debug(
-            f"    Mergeing Conv layers: "
-            f"{conv1.in_channels}→{conv1.out_channels}→{conv2.out_channels}"
-        )
-
-        W1 = conv1.weight.detach()  # [C_mid, C_in, k1, k1]
-        W2 = conv2.weight.detach()  # [C_out, C_mid, k2, k2]
-
-        C_mid, C_in, k1, _ = W1.shape
-        C_out, C_mid2, k2, _ = W2.shape
-
-        k_merge = k1 + k2 - 1
-
-        # ---------------------------------------------------------
-        # Flip W2 because conv2d does cross-correlation
-        # Need true kernel convolution for composition
-        # ---------------------------------------------------------
-        W2_flip = torch.flip(W2, dims=(-1, -2))
-
-        # ---------------------------------------------------------
-        # Vectorized kernel composition
-        #
-        # Treat each (out_channel, mid_channel) kernel in W2 as a
-        # conv filter applied to all matching W1[mid_channel, in_channel]
-        # ---------------------------------------------------------
-        W_merge = torch.zeros(
-            (C_out, C_in, k_merge, k_merge),
-            device=W1.device,
-            dtype=W1.dtype,
-        )
-
-        # Process each intermediate channel j
-        for j in range(C_mid):
-            # Input kernels from conv1:
-            # [C_in, 1, k1, k1]
-            x = W1[j].unsqueeze(1)
-
-            # Filters from conv2:
-            # [C_out, 1, k2, k2]
-            w = W2_flip[:, j].unsqueeze(1)
-
-            # Apply all output filters to all input kernels
-            # output: [C_in, C_out, k_merge, k_merge]
-            out = F.conv2d(
-                x,
-                w,
-                padding=k2 - 1
-            )
-
-            # Rearrange to [C_out, C_in, k_merge, k_merge]
-            out = out.permute(1, 0, 2, 3)
-
-            W_merge += out
-
-        # ---------------------------------------------------------
-        # Build merged conv
-        # ---------------------------------------------------------
-        new_conv = nn.Conv2d(
-            in_channels=C_in,
-            out_channels=C_out,
-            kernel_size=k_merge,
-            padding=k_merge // 2,
-            bias=False,
-        ).to(W1.device)
-        new_conv.weight.data.copy_(W_merge)
-
-        return new_conv
-
-    # ------------------------------------------------------------
-    # Main traversal
-    # ------------------------------------------------------------
     for module_name, block in model.named_modules():
         if not isinstance(block, nn.Sequential):
             continue
 
-        logger.debug(f"\n[Inspecting block] {module_name}")
-
-        # Block is a sequential with 2 basic blocks of the ResNet architecture. Iterate over them.
         for idx, module in enumerate(block):
-            # logger.debug(f" Inspecting module: {module}")
+            # Dynamically find all conv/bn pairs in order
+            # Works for BasicBlock (conv1/bn1/conv2/bn2) and
+            # Bottleneck (conv1/bn1/conv2/bn2/conv3/bn3)
+            conv_bn_pairs = []
+            children = dict(module.named_children())
+            for attr, child in sorted(children.items()):
+                if attr.startswith("conv") and isinstance(getattr(module, attr), nn.Conv2d):
+                    conv_idx = attr[len("conv"):]
+                    bn_attr = f"bn{conv_idx}"
+                    if hasattr(module, bn_attr) and isinstance(getattr(module, bn_attr), nn.BatchNorm2d):
+                        conv_bn_pairs.append((attr, bn_attr))
 
-            if not hasattr(module, 'conv1') or not hasattr(module, 'bn1') or not hasattr(module, 'relu') or not hasattr(module, 'conv2'):
-                logger.debug("  Not a Conv-BN-ReLU-Conv block → skipping")
+            if len(conv_bn_pairs) < 2:
+                logger.debug(f"{module_name}.{idx}: fewer than 2 conv-bn pairs → skipping")
                 continue
 
-            conv1 = module.conv1
-            bn1 = module.bn1
-            relu = module.relu
-            conv2 = module.conv2
-
-            if not (
-                isinstance(conv1, nn.Conv2d)
-                and isinstance(bn1, nn.BatchNorm2d)
-                and isinstance(relu, nn.ReLU)
-                and isinstance(conv2, nn.Conv2d)
-            ):
-                logger.debug("  Not Conv-BN-ReLU-Conv → skipping")
+            # Check every conv in the block is in linear_layers
+            conv_names = [f"{module_name}.{idx}.{attr}" for attr, _ in conv_bn_pairs]
+            if not all(name in linear_layers for name in conv_names):
+                logger.debug(f"{module_name}.{idx}: not all convs linear → skipping")
                 continue
 
-            conv1_name = f"{module_name}.{idx}.conv1"
-
-            logger.debug(f"  Found Conv-BN-ReLU-Conv at {conv1_name}")
-
-            if conv1_name not in linear_layers.keys():
-                logger.debug("    Below threshold → ReLU not linear")
+            # Check mergeability across all convs
+            convs = [getattr(module, attr) for attr, _ in conv_bn_pairs]
+            if any(c.stride != (1, 1) or c.groups != 1 for c in convs):
+                logger.debug(f"{module_name}.{idx}: stride/groups incompatible → skipping")
                 continue
 
-            # Validate mergeability
-            if (
-                conv1.stride != (1, 1)
-                or conv2.stride != (1, 1)
-                or conv1.groups != 1
-                or conv2.groups != 1
-            ):
-                logger.debug("    Stride/groups incompatible → skipping")
-                continue
+            logger.debug(f"Merging {len(convs)}-conv block at {module_name}.{idx}")
 
-            logger.debug("    Linearity condition satisfied")
-            logger.debug("    Removing BatchNorm and ReLU, merging Convs")
+            # Merge each BN into its conv, then chain-merge all convs left to right
+            bns = [getattr(module, attr) for _, attr in conv_bn_pairs]
+            for conv, bn in zip(convs, bns):
+                merge_bn_into_conv(conv, bn)
 
-            # ----------------------------------------------------
-            # Merge BN → Conv1
-            # ----------------------------------------------------
-            merge_bn_into_conv(conv1, bn1)
+            merged_conv = convs[0]
+            for next_conv in convs[1:]:
+                merged_conv = merge_convs(merged_conv, next_conv)
+            merged_conv.to(device)
 
-            # ----------------------------------------------------
-            # Merge Conv1 → Conv2
-            # ----------------------------------------------------
-            new_conv = merge_convs(conv1, conv2)
-            new_conv.to(device)
+            # Replace: put merged conv in first slot, identity everything else
+            setattr(module, conv_bn_pairs[0][0], merged_conv)
+            for conv_attr, bn_attr in conv_bn_pairs:
+                setattr(module, bn_attr, nn.Identity())
+                if hasattr(module, "relu"):
+                    setattr(module, "relu", nn.Identity())
+            for conv_attr, _ in conv_bn_pairs[1:]:
+                setattr(module, conv_attr, nn.Identity())
 
-            # ----------------------------------------------------
-            # Replace modules
-            # ----------------------------------------------------
-            setattr(module, 'conv1', new_conv)
-            setattr(module, 'bn1', nn.Identity())
-            setattr(module, 'relu', nn.Identity())
-            setattr(module, 'conv2', nn.Identity())
+            merged_pairs.append(tuple(conv_names))
+            logger.debug(f"Merged {conv_names} into single conv")
 
-            merged_pairs.append((conv1_name, f"{module_name}.{idx}.conv2"))
-
-            logger.debug("    Merging complete")
-
-    logger.info(f"\n[Layer Merging] Done. Merged {len(merged_pairs)} layer pairs.\n")
-
+    logger.info(f"[Layer Merging] Done. Merged {len(merged_pairs)} groups.")
     return merged_pairs
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
