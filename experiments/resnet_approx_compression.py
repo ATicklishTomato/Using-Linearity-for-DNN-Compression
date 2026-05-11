@@ -268,8 +268,6 @@ def train_block_approximation(
 
             inputs, _ = data
             inputs = inputs.to(device)
-            layer_group = ""
-            loss = 0
             for approx, layer_group, optimizer in approximators:
                 x, y_teacher = get_block_input_output(model, inputs, layer_group, device=device)
 
@@ -282,7 +280,7 @@ def train_block_approximation(
 
                 loss.backward()
                 optimizer.step()
-            logger.info(f"Block {layer_group} | Epoch {epoch} | Loss {loss.item():.6f}")
+        logger.info(f"Epoch {epoch} | Blocks trained: {len(approximators)}")
 
     return [(approx, layer_group) for approx, layer_group, _ in approximators]
 
