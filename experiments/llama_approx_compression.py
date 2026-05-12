@@ -29,6 +29,9 @@ def group_contiguous_layers(linear_layers):
         for layer in linear_layers.keys()
     )
 
+    if len(indices) <= 0:
+        return []
+
     groups = []
     current = [indices[0]]
 

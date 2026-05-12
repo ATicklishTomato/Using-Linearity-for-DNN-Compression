@@ -1,8 +1,8 @@
 
 
 path = "./rq1/approx/*/*/*/*/*.bash"
-target = '-e compression'
-replace = "-e linear_approximator_compression"
+target = '--time=12:00:00'
+replace = "--time=15:00:00"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path

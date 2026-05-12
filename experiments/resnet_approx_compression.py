@@ -214,7 +214,7 @@ def get_block_input_output(model, model_input, layer_group, device="cuda") -> Tu
 
     return group_input, group_output
 
-def train_block_approximation(
+def train_block_approximations(
     model,
     layer_groups,
     train_dataset,
@@ -297,7 +297,7 @@ def train_approximation_layers(experimenter, data_handler, groups,
     Returns:
         The compressed model with linear approximations.
     """
-    replacements = train_block_approximation(
+    replacements = train_block_approximations(
         experimenter.model,
         groups,
         data_handler.train_set,
