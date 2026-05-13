@@ -344,7 +344,7 @@ def run_experiment(model: str, dataset: str, relation_to: str, batch_size: int,
     # Load linearity scores
     # ------------------------------------------------------------
     conv_names = None
-    if "resnet" in experimenter.model:
+    if "resnet" in experimenter.model_name:
         conv_names = [name for name, module in experimenter.model.named_modules() if
                       isinstance(module, torch.nn.Conv2d) and "downsample" not in name]
 

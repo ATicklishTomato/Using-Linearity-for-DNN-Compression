@@ -219,10 +219,10 @@ def train_approximation_layers(experimenter, data_handler, groups, save_model: b
     for replacement in replacements:
         replace_attention_block(*replacement)
 
-    if save_model:
-        # Save the compressed model
-        experimenter.model.save_pretrained(f"{save_path}/compressed_{experimenter.model_name}")
-        logger.info(f"Compressed model saved to {save_path}/compressed_{experimenter.model_name}")
+    # if save_model:
+    #     # Save the compressed model
+    #     experimenter.model.save_pretrained(f"{save_path}/compressed_{experimenter.model_name}")
+    #     logger.info(f"Compressed model saved to {save_path}/compressed_{experimenter.model_name}")
 
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,

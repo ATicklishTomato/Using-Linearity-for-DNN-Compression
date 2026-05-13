@@ -1,8 +1,8 @@
 
 
-path = "./rq1/approx/*/*/*/*/*.bash"
-target = '--time=12:00:00'
-replace = "--time=15:00:00"
+path = "./rq1/procrustes/*/llama*/*/*.bash"
+target = '--mem=64G'
+replace = "--mem=96G"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path
