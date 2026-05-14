@@ -187,3 +187,4 @@ old_results
 !results/*.tar.gz
 !results/*.rar
 !results/*.zip
+run_scripts/**/*.bash
