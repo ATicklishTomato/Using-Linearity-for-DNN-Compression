@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import logging
 import wandb
+import gc
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -33,6 +34,9 @@ def group_contiguous_layers(linear_layers, all_layers, model):
     # ------------------------------------------
     indices = sorted(list(linear_layers.keys()))
     ground_truth = sorted(all_layers)
+
+    if len(indices) <= 0:
+        return []
 
     # ------------------------------------------
     # 2. Basic contiguous grouping (unchanged logic)
@@ -214,6 +218,38 @@ def get_block_input_output(model, model_input, layer_group, device="cuda") -> Tu
 
     return group_input, group_output
 
+def get_all_block_inputs_outputs(model, model_input, layer_groups, device="cuda"):
+    captured = {i: {"input": None, "output": None} for i in range(len(layer_groups))}
+
+    logger.info("Getting all block inputs and outputs")
+
+    hooks = []
+    for i, group in enumerate(layer_groups):
+        idx = i  # capture by value
+        def make_input_hook(j):
+            def hook(module, input, output):
+                captured[j]["input"] = input[0].cpu().detach()
+            return hook
+        def make_output_hook(j):
+            def hook(module, input, output):
+                captured[j]["output"] = output.cpu().detach()
+            return hook
+
+        hooks.append(model.get_submodule(group[0]).register_forward_hook(make_input_hook(idx)))
+        hooks.append(model.get_submodule(group[-1]).register_forward_hook(make_output_hook(idx)))
+
+    with torch.no_grad():
+        model.to(device)
+        model_input = model_input.to(device)
+        model(model_input)
+
+    for hook in hooks:
+        hook.remove()
+
+    logger.info("Returning all block inputs and outputs")
+
+    return [captured[i]["input"] for i in range(len(layer_groups))], [captured[i]["output"] for i in range(len(layer_groups))]
+
 def train_block_approximations(
     model,
     layer_groups,
@@ -253,6 +289,7 @@ def train_block_approximations(
         in_shape = x.shape
         out_shape = y_teacher.shape
         logger.debug(f"Training block approximation for layer group {layer_group} with input size {in_shape} and output size {out_shape}")
+        del x, y_teacher
 
         approx = LinearConvolutionalBlock(in_shape, out_shape).to(device)
         approx.train().to(device)
@@ -264,12 +301,14 @@ def train_block_approximations(
     loss_fn = torch.nn.MSELoss()
 
     for epoch in range(epochs):
-        for i, data in tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training layer groups Epoch {epoch+1}", leave=False, disable=debug_mode):
+        for data in tqdm(train_loader, total=len(train_loader), desc=f"Training layer groups Epoch {epoch+1}", leave=False, disable=debug_mode):
 
             inputs, _ = data
             inputs = inputs.to(device)
-            for approx, layer_group, optimizer in approximators:
-                x, y_teacher = get_block_input_output(model, inputs, layer_group, device=device)
+            xs, y_teachers = get_all_block_inputs_outputs(model, inputs, layer_groups, device=device)
+            for approximator, x, y_teacher in zip(approximators, xs, y_teachers):
+                approx, layer_group, optimizer = approximator
+                x, y_teacher = x.to(device), y_teacher.to(device)
 
                 y_student = approx(x)
                 logger.debug(f"y_student shape: {y_student.shape}, y_teacher shape: {y_teacher.shape}")
@@ -308,6 +347,8 @@ def train_approximation_layers(experimenter, data_handler, groups,
     )
     for approx, layer_group in replacements:
         replace_attention_block(experimenter.model, layer_group, approx)
+
+    del replacements
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, batch_size: int,
                    epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str,
@@ -377,6 +418,8 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Finetune the compressed model
     # ------------------------------------------------------------
+    gc.collect()
+    torch.cuda.empty_cache()
     experimenter.finetune()
 
     # ------------------------------------------------------------
