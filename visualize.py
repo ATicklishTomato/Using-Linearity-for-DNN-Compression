@@ -66,6 +66,8 @@ def parse_args():
                         help='Linearity metric to use. `mean_preactivation` refers to the mean of preactivations as defined by Pinson et al. (2024). ' +
                              '`procrustes` refers to the Procrustes similarity-based metric as defined by Razzhigaev et al (2024). ' +
                              '`fraction` refers to the fraction of neurons that is activated by an activation function.')
+    parser.add_argument('--approx', action='store_true',
+                        help='Whether to aggregate results for linear approximator method instead of layer merging for RQ1. Only applicable for ResNets.')
     return parser.parse_args()
 
 def mean_rq1_results(path):
@@ -448,7 +450,8 @@ if __name__ == '__main__':
             print(f"Aggregating results for RQ: {rq}, Threshold: {threshold}, Model: {model}, Dataset: {dataset}, Relation: {relation_to}" +
               f", Linearity: {linearity}")
             if rq == 'rq1':
-                path = f"./results/rq1/{linearity}/{threshold}/{model}/{dataset}/"
+                opt_approx = "approx/" if args.approx else ""
+                path = f"./results/rq1/{opt_approx}{linearity}/{threshold}/{model}/{dataset}/"
             elif rq == 'rq2':
                 path = f"./results/rq2/all/{relation_to}/{model}/{dataset}/"
             elif rq == 'benchmark':

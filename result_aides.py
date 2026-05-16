@@ -63,7 +63,7 @@ if __name__ == '__main__':
     #
     # plot_layer_metrics(labels, preactivations_scores, fraction_scores, procrustes_scores, "./llama-3-1b_tinystories_metrics_comparison.png")
 
-    path = './results/rq2/all/*/llama-3-1b/*/results.tex'
+    path = './results/rq1/approx/*/*/resnet18/*/results.tex'
 
     import glob
 
@@ -85,7 +85,7 @@ if __name__ == '__main__':
 
         rows += row + "\n"
 
-    with open("./results/rq1/llama-3-1b_benchmark_results.tex", 'w') as f:
+    with open("./results/rq1/resnet18_approx_results.tex", 'w') as f:
         f.write(start + rows + finish)
 
 
