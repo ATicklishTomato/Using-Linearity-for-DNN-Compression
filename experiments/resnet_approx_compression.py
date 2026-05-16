@@ -221,7 +221,7 @@ def get_block_input_output(model, model_input, layer_group, device="cuda") -> Tu
 def get_all_block_inputs_outputs(model, model_input, layer_groups, device="cuda"):
     captured = {i: {"input": None, "output": None} for i in range(len(layer_groups))}
 
-    logger.info("Getting all block inputs and outputs")
+    logger.debug("Getting all block inputs and outputs")
 
     hooks = []
     for i, group in enumerate(layer_groups):
@@ -246,7 +246,7 @@ def get_all_block_inputs_outputs(model, model_input, layer_groups, device="cuda"
     for hook in hooks:
         hook.remove()
 
-    logger.info("Returning all block inputs and outputs")
+    logger.debug("Returning all block inputs and outputs")
 
     return [captured[i]["input"] for i in range(len(layer_groups))], [captured[i]["output"] for i in range(len(layer_groups))]
 
@@ -409,11 +409,18 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # ------------------------------------------------------------
     # Group contiguous linear layers and create linear approximation layers
     # ------------------------------------------------------------
-    all_layers = list(linear_layers.keys()) + list(nonlinear_layers.keys())
-    groups = group_contiguous_layers(linear_layers, all_layers, experimenter.model)
-    train_approximation_layers(experimenter, data_handler, groups, epochs=epochs, lr=lr,
-                               batch_size=batch_size, device=device)
-    logger.info("Linear approximation layers trained and integrated into the model.")
+    if os.path.exists(f"{save_dir}/{model}_compressed_no_finetune.pth"):
+        # Load model from disk
+        experimenter.model.load_state_dict(torch.load(f"{save_dir}/{model}_compressed_no_finetune.pth"))
+        logger.info(f"Loaded compressed model without finetuning from {save_dir}/{model}_compressed_no_finetune.pth")
+    else:
+        all_layers = list(linear_layers.keys()) + list(nonlinear_layers.keys())
+        groups = group_contiguous_layers(linear_layers, all_layers, experimenter.model)
+        train_approximation_layers(experimenter, data_handler, groups, epochs=epochs, lr=lr,
+                                   batch_size=batch_size, device=device)
+        logger.info("Linear approximation layers trained and integrated into the model.")
+        torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_compressed_no_finetune.pth")
+        logger.info(f"Saved compressed model without finetuning to {save_dir}/{model}_compressed_no_finetune.pth")
 
     # ------------------------------------------------------------
     # Finetune the compressed model

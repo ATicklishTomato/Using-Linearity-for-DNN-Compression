@@ -1,4 +1,4 @@
-# Utilizing Inherent Linearity in Deep Neural Networks for Model Compression
+# Utilizing Effective Linearity in Deep Neural Networks for Model Compression
 
 This repository encompasses experimental code for my thesis on linearity in CNNs and transformers.
 

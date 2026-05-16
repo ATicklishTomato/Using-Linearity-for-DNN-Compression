@@ -1,8 +1,8 @@
 
 
-path = "./rq1/procrustes/*/llama*/*/*.bash"
-target = '--mem=64G'
-replace = "--mem=96G"
+path = "./rq2/hybridization/*/*/*/*.bash"
+target = '--hybridization'
+replace = "--relation"
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path
