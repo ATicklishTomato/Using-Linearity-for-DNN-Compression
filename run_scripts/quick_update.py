@@ -1,6 +1,6 @@
 
 
-path = "./rq2/hybridization/*/llama*/*/*.bash"
+path = "./rq2/hybridization/*/resnet*/*/*.bash"
 target = '--mem=16G'
 replace = '--mem=96G'
 

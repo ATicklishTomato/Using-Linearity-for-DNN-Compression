@@ -1,3 +1,4 @@
+import gc
 import logging
 import os
 from typing import Union, Optional
@@ -159,7 +160,8 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
     logger.info(f"Merged model accuracy: {compressed_accuracy:.4f}, parameters: {compressed_param_count}, "
                 f"inference time: {compressed_inference_time:.4f} seconds, gflops: {compressed_gflops}")
 
-
+    gc.collect()
+    torch.cuda.empty_cache()
 
     # ------------------------------------------------------------
     # Apply pruning if that is the hybrid pairing
@@ -198,22 +200,25 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
 
             from compression_methods.wanda_pruning import prune
 
-            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
-                experimenter, data_handler, device=device,
-                pruning_ratio=pruning_ratio, lr=lr,
-                batch_size=batch_size, epochs=epochs)
+            with torch.amp.autocast(device_type=device):
+                prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
+                    experimenter, data_handler, device=device,
+                    pruning_ratio=pruning_ratio, lr=lr,
+                    batch_size=batch_size, epochs=epochs)
         case 'slicegpt':
             if "resnet" in experimenter.model_name:
                 raise ValueError("SliceGPT is not supported for ResNet models")
 
             from compression_methods.slicegpt import prune
 
-            prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
-                experimenter, data_handler, device=device,
-                pruning_ratio=pruning_ratio, lr=lr,
-                batch_size=batch_size, epochs=epochs)
+            with torch.amp.autocast(device_type=device):
+                prune_dict, compressed_accuracy, compressed_param_count, compressed_inference_time, compressed_gflops = prune(
+                    experimenter, data_handler, device=device,
+                    pruning_ratio=pruning_ratio, lr=lr,
+                    batch_size=batch_size, epochs=epochs)
 
-
+    gc.collect()
+    torch.cuda.empty_cache()
 
     # ------------------------------------------------------------
     # Evaluate compressed model performance
