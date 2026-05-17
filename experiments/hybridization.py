@@ -141,12 +141,15 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
     # ------------------------------------------------------------
 
     if "resnet" in experimenter.model_name:
-        from experiments.resnet_approx_compression import group_contiguous_layers, train_approximation_layers
-        all_layers = list(linear_layers.keys()) + list(nonlinear_layers.keys())
-        groups = group_contiguous_layers(linear_layers, all_layers, experimenter.model)
-        train_approximation_layers(experimenter, data_handler, groups, epochs=epochs, lr=lr,
-                                   batch_size=batch_size, device=device)
-        logger.info("Linear approximation layers trained and integrated into the model.")
+        # from experiments.resnet_approx_compression import group_contiguous_layers, train_approximation_layers
+        # all_layers = list(linear_layers.keys()) + list(nonlinear_layers.keys())
+        # groups = group_contiguous_layers(linear_layers, all_layers, experimenter.model)
+        # train_approximation_layers(experimenter, data_handler, groups, epochs=epochs, lr=lr,
+        #                            batch_size=batch_size, device=device)
+        # logger.info("Linear approximation layers trained and integrated into the model.")
+        from experiments.resnet_fold_compression import merge_linear_conv_sequences
+        merged_pairs = merge_linear_conv_sequences(experimenter.model, linear_layers)
+        logger.info(f"Merged layer pairs: {merged_pairs}")
     else:
         from experiments.llama_approx_compression import group_contiguous_layers, train_approximation_layers
         groups = group_contiguous_layers(linear_layers)

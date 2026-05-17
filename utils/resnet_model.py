@@ -67,6 +67,11 @@ class ResNetExperimenter:
     def finetune(self):
         """Finetune the ResNet model such that it can be used for linearity metric evaluations."""
 
+        if hasattr(self.model, 'set_grad_checkpointing') and self.model_name == "resnet50":
+            # The Nvidia L4 cards only have 22GB VRAM each, and we run out of it on approx experiments
+            logger.info("Enabling gradient checkpointing to reduce VRAM usage during finetuning.")
+            self.model.set_grad_checkpointing(True)
+
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
 

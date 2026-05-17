@@ -1,6 +1,6 @@
 
 
-path = "./rq2/hybridization/*/resnet*/*/*.bash"
+path = "./rq2/hybridization/magnitude_pruning/*/*/*.bash"
 target = '--mem=16G'
 replace = '--mem=96G'
 

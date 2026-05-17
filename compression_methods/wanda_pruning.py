@@ -6,6 +6,7 @@ import logging
 from torch import nn
 
 from compression_methods.magnitude_pruning import finetune_llama, evaluate_llama
+from experiments.llama_approx_compression import LinearAttentionBlock, IdentityBlock
 
 """
 This code is a modification of code in the repo supporting the paper
@@ -85,10 +86,14 @@ def find_layers(module, layers=[nn.Linear], name=''):
     Returns:
         dict: Dictionary of layers of the given type(s) within the module.
     """
+    if type(module)  in [LinearAttentionBlock, IdentityBlock]:
+        return {}
     if type(module) in layers:
         return {name: module}
     res = {}
     for name1, child in module.named_children():
+        if type(child)  in [LinearAttentionBlock, IdentityBlock]:
+            continue
         res.update(find_layers(
             child, layers=layers, name=name + '.' + name1 if name != '' else name1
         ))
@@ -293,6 +298,8 @@ def generate_prune_dict(model):
     layers = model.model.layers
     prune_dict = {}
     for i, layer in enumerate(layers):
+        if type(layer) in [LinearAttentionBlock, IdentityBlock]:
+            continue
         attn = layer.self_attn
 
         # --- Attention sparsity ---

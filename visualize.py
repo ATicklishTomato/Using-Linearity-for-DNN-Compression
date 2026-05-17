@@ -456,6 +456,8 @@ if __name__ == '__main__':
                 path = f"./results/rq2/all/{relation_to}/{model}/{dataset}/"
             elif rq == 'benchmark':
                 path = f"./results/rq2/all/{relation_to}/{model}/{dataset}/"
+            elif rq == 'hybridization':
+                path = f"./results/rq2/{linearity}/{relation_to }_hybrid/{model}/{dataset}/"
             else:
                 raise ValueError("Invalid RQ choice. Must be one of 'rq1', 'rq2', or 'benchmark'.")
 
@@ -492,6 +494,12 @@ if __name__ == '__main__':
                     mean_bench = mean_benchmark_results(path)
                     print("Benchmark results:", mean_bench)
                     generate_latex_results_table(mean_bench, model, dataset, linearity, threshold, path, pretty_benchmark_names[relation_to])
+                case 'hybridization':
+                    mean_hybrid = mean_benchmark_results(path)
+                    print("Hybridization results:", mean_hybrid)
+                    generate_latex_results_table(mean_hybrid, model, dataset, linearity, threshold, path, f"{pretty_benchmark_names[relation_to]} hybrid")
+                case _:
+                    raise ValueError("Invalid RQ choice. Must be one of 'rq1', 'rq2', 'benchmark', or 'hybridization'.")
         except Exception as e:
             failed_combinations.append((rq, threshold, model, dataset, relation_to, linearity, e))
 

@@ -9,6 +9,8 @@ from torch_pruning.utils import count_ops_and_params
 from tqdm import tqdm
 import logging
 
+from experiments.llama_approx_compression import LinearAttentionBlock, IdentityBlock
+
 logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
@@ -338,6 +340,8 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
     layers = model.model.layers
 
     for i, layer in enumerate(layers):
+        if type(layer) in [LinearAttentionBlock, IdentityBlock]:
+            continue
         if layer is model.lm_head:
             # Leave final fc alone
             continue
@@ -381,6 +385,8 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
     pruned_ratios = {}
 
     for i, layer in enumerate(layers):
+        if type(layer) in [LinearAttentionBlock, IdentityBlock]:
+            continue
         if layer is model.lm_head:
             # Leave final fc alone
             continue
@@ -417,6 +423,8 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
     model.config.hidden_size = model.lm_head.in_features
 
     for name, m in model.named_modules():
+        if type(m) in [LinearAttentionBlock, IdentityBlock]:
+            continue
         if m is model.lm_head:
             # Leave final fc alone
             continue
