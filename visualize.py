@@ -46,7 +46,7 @@ pretty_benchmark_names = {
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--rq', type=str, choices=['rq1', 'rq2', 'benchmark'], default=['rq1'], nargs='+',
+    parser.add_argument('--rq', type=str, choices=['rq1', 'rq2', 'benchmark', 'hybridization'], default=['rq1'], nargs='+',
                         help='Which Research Question to aggregate results for')
     parser.add_argument('--threshold', type=str, choices=['float', '25', '50', '75'], default=['75'], nargs='+',
                         help='Threshold to aggregate results for')

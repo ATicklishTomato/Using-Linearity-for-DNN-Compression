@@ -1,8 +1,8 @@
 
 
 path = "./rq2/hybridization/magnitude_pruning/*/*/*.bash"
-target = '--mem=16G'
-replace = '--mem=96G'
+target = 'procrustes'
+replace = 'mean_preactivation'
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path

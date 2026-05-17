@@ -12,7 +12,7 @@ import utils.util_functions as utils
 
 logger = logging.getLogger(__name__)
 
-def run_experiment(model: str, linearity: str, dataset: str, compression_method: str, batch_size: int,
+def run_experiment(model: str, linearity: str, dataset: str, threshold: str, compression_method: str, batch_size: int,
                    epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str,
                    skip_finetune_path: Optional[str], pruning_ratio: float=0.1, blocks: Union[None, list]=None,
                    hidden_layer_reduction: int=2):
@@ -22,6 +22,7 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
         model (str): The model architecture to use (e.g., 'resnet18', 'llama-3.2-1b').
         linearity (str): The linearity metric to use (e.g., 'mean_preactivation', 'procrustes', or 'fraction').
         dataset (str): The dataset to use (e.g., 'imagenet').
+        threshold (str): The threshold to determine (non-)linearity.
         compression_method (str): The compression method identifier to compare against (e.g. 'magnitude_pruning', 'basic_kd')
         batch_size (int): The batch size for training and evaluation.
         epochs (int): The number of epochs for fine-tuning.
@@ -129,8 +130,7 @@ def run_experiment(model: str, linearity: str, dataset: str, compression_method:
     # ------------------------------------------------------------
     # Compute linearity scores
     # ------------------------------------------------------------
-    # We hardcode threshold because we don't care about the split in this case
-    metric = LinearityMetric(linearity, model, data_handler, "50%", device, save, save_dir)
+    metric = LinearityMetric(linearity, model, data_handler, threshold, device, save, save_dir)
     linearity_scores = metric.metric_fn(experimenter.model)
     logger.info("Linearity scores computed.")
     logger.debug(f"Linearity scores: {linearity_scores}")
