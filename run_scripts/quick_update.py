@@ -1,8 +1,8 @@
 
 
-path = "./rq2/hybridization/magnitude_pruning/*/*/*.bash"
-target = 'procrustes'
-replace = 'mean_preactivation'
+path = "./rq1/approx/*/*/resnet50/*/*.bash"
+target = '--gres=gpu:l4.22gb:1'
+replace = '--gres=gpu:l4.22gb:2'
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path
