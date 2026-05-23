@@ -337,7 +337,7 @@ def train_approximation_layers(experimenter, data_handler, groups,
         The compressed model with linear approximations.
     """
     replacements = train_block_approximations(
-        experimenter.raw_model,
+        experimenter.model,
         groups,
         data_handler.train_set,
         device,
@@ -346,7 +346,7 @@ def train_approximation_layers(experimenter, data_handler, groups,
         batch_size=batch_size
     )
     for approx, layer_group in replacements:
-        replace_attention_block(experimenter.raw_model, layer_group, approx)
+        replace_attention_block(experimenter.model, layer_group, approx)
 
     del replacements
 
@@ -383,7 +383,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     logger.info("Model and data loaded, model fine-tuned.")
     if save and not experimenter.skipped:
         # Save finetuned original
-        torch.save(experimenter.raw_model.state_dict(), f"{save_dir}/{model}_original.pth")
+        torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_original.pth")
         logger.info(f"Saved finetuned original model to {save_dir}/{model}_original.pth")
     elif save:
         logger.info(f"Skipped saving finetuned model as it was loaded from disk. Loaded from {skip_finetune_path}.")
@@ -399,7 +399,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # Compute linearity scores
     # ------------------------------------------------------------
     metric = LinearityMetric(linearity, model, data_handler, threshold, device, save, save_dir)
-    linearity_scores = metric.metric_fn(experimenter.raw_model)
+    linearity_scores = metric.metric_fn(experimenter.model)
     logger.info("Linearity scores computed.")
     logger.debug(f"Linearity scores: {linearity_scores}")
     linear_layers, nonlinear_layers = metric.thresholder(linearity_scores)
@@ -410,7 +410,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
     # Group contiguous linear layers and create linear approximation layers
     # ------------------------------------------------------------
     all_layers = list(linear_layers.keys()) + list(nonlinear_layers.keys())
-    groups = group_contiguous_layers(linear_layers, all_layers, experimenter.raw_model)
+    groups = group_contiguous_layers(linear_layers, all_layers, experimenter.model)
     train_approximation_layers(experimenter, data_handler, groups, epochs=epochs, lr=lr,
                                batch_size=batch_size, device=device)
     logger.info("Linear approximation layers trained and integrated into the model.")
@@ -443,7 +443,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, bat
         import json
 
         # Save merged model
-        torch.save(experimenter.raw_model.state_dict(), f"{save_dir}/{model}_compressed.pth")
+        torch.save(experimenter.model.state_dict(), f"{save_dir}/{model}_compressed.pth")
 
         # Save results
         results = {

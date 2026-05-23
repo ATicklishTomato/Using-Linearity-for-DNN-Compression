@@ -1,6 +1,3 @@
-import faulthandler
-faulthandler.enable()
-
 import os
 import random
 from argparse import ArgumentParser

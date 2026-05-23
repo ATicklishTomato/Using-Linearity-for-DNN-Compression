@@ -1,6 +1,5 @@
 import glob
 import time
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -37,16 +36,6 @@ class ResNetExperimenter:
             case _:
                 raise ValueError(f"Unsupported model: {model_name}.")
 
-        # Optionally wrap with DataParallel when a second GPU is available.
-        # The primary device is kept as self.device; DataParallel handles
-        # scattering batches across all visible CUDA devices automatically.
-        if torch.cuda.device_count() > 1:
-            logger.info(
-                f"multi_gpu=True and {torch.cuda.device_count()} GPUs detected. "
-                "Wrapping model with nn.DataParallel."
-            )
-            self.model = nn.DataParallel(self.model)
-
         if skip_finetune_path is not None:
             try:
                 logger.info(
@@ -55,11 +44,7 @@ class ResNetExperimenter:
                 )
                 path = str(glob.glob(self.skip_finetune_path, recursive=True)[0])
                 logger.info(f"Found save path {path}, attempting to load")
-                # load_state_dict must target the underlying model, not the
-                # DataParallel wrapper, because the saved weights use plain
-                # layer names (e.g. "layer1.0.conv1.weight"), not the
-                # "module.*" prefix that DataParallel adds.
-                self._unwrap().load_state_dict(torch.load(path, weights_only=True))
+                self.model.load_state_dict(torch.load(path, weights_only=True))
                 logger.info("Loaded finetuned model from file")
                 self.skipped = True
             except Exception as e:
@@ -68,23 +53,6 @@ class ResNetExperimenter:
         else:
             self.finetune()
 
-    @property
-    def raw_model(self) -> nn.Module:
-        return self.model.module if isinstance(self.model, nn.DataParallel) else self.model
-
-    def _unwrap(self) -> nn.Module:
-        """Return the raw ResNet, regardless of whether DataParallel is active.
-
-        Use this wherever you need the underlying model rather than the
-        wrapper — specifically for load_state_dict, state_dict, and
-        count_ops_and_params (which probes the model with a single example
-        input and does not expect the DataParallel scatter/gather overhead).
-        """
-        return self.model.module if isinstance(self.model, nn.DataParallel) else self.model
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _initialize_resnet_model(self, layers):
         """Initialize a ResNet model with the specified number of layers."""
@@ -101,12 +69,11 @@ class ResNetExperimenter:
         logger.info(f"Initialized ResNet model with {layers} layers.")
         return model
 
+
     def finetune(self):
         """Finetune the ResNet model such that it can be used for linearity metric evaluations."""
 
         criterion = nn.CrossEntropyLoss()
-        # Optimise the underlying parameters; works the same whether or not
-        # DataParallel is active because DataParallel does not add parameters.
         optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
 
         train_loader = DataLoader(
@@ -154,7 +121,7 @@ class ResNetExperimenter:
             avg_inference_time: Average inference time per sample.
             gflops:             GFLOPs during a single forward pass.
         """
-        raw_model = self._unwrap().to(self.device).eval()  # bypass DataParallel entirely for validation
+        self.model.to(self.device).eval()
         correct = 0
         total = 0
         inference_time = 0
@@ -182,7 +149,7 @@ class ResNetExperimenter:
                     example_input = inputs
 
                 start = time.time()
-                outputs = raw_model(inputs)
+                outputs = self.model(inputs)
                 end = time.time()
                 _, predicted = torch.max(outputs, 1)
 
@@ -196,12 +163,11 @@ class ResNetExperimenter:
         # count_ops_and_params probes the model with a single forward pass, so
         # it must receive the unwrapped ResNet — DataParallel's scatter/gather
         # logic is not compatible with the single-sample probe it uses internally.
-        raw_model = self._unwrap()
-        param_count = sum(p.numel() for p in raw_model.parameters())
+        param_count = sum(p.numel() for p in self.model.parameters())
         inference_time /= total
 
         with torch.no_grad():
-            macs, _ = count_ops_and_params(raw_model, example_input.to(self.device))
+            macs, _ = count_ops_and_params(self.model, example_input.to(self.device))
         gflops = 2 * macs / 1e9
 
         return accuracy, param_count, inference_time, gflops
