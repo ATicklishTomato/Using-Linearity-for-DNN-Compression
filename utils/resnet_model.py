@@ -117,6 +117,7 @@ class ResNetExperimenter:
             pin_memory=True,
             prefetch_factor=2,
             persistent_workers=True,
+            multiprocessing_context='spawn',
         )
 
         self.model.train()
@@ -153,7 +154,7 @@ class ResNetExperimenter:
             avg_inference_time: Average inference time per sample.
             gflops:             GFLOPs during a single forward pass.
         """
-        model = self.model.to(self.device).eval()
+        raw_model = self._unwrap().to(self.device).eval()  # bypass DataParallel entirely for validation
         correct = 0
         total = 0
         inference_time = 0
@@ -165,16 +166,23 @@ class ResNetExperimenter:
             pin_memory=True,
             prefetch_factor=2,
             persistent_workers=False,
+            multiprocessing_context='spawn',
         )
 
+        logger.info("DataLoader initialized.")
+
+        example_input = None
         with torch.no_grad():
             for inputs, labels in tqdm(data_loader, total=len(data_loader), desc="Validating ResNet model", leave=False,
                 disable=debug_mode):
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
 
+                if example_input is None:
+                    example_input = inputs
+
                 start = time.time()
-                outputs = model(inputs)
+                outputs = raw_model(inputs)
                 end = time.time()
                 _, predicted = torch.max(outputs, 1)
 
@@ -182,6 +190,7 @@ class ResNetExperimenter:
                 correct += (predicted == labels).sum().item()
                 inference_time += end - start
 
+        logger.info("Validation loop completed.")
         accuracy = correct / total
 
         # count_ops_and_params probes the model with a single forward pass, so
@@ -192,8 +201,7 @@ class ResNetExperimenter:
         inference_time /= total
 
         with torch.no_grad():
-            example_input = next(iter(data_loader))
-            macs, _ = count_ops_and_params(raw_model, example_input[0].to(self.device))
+            macs, _ = count_ops_and_params(raw_model, example_input.to(self.device))
         gflops = 2 * macs / 1e9
 
         return accuracy, param_count, inference_time, gflops

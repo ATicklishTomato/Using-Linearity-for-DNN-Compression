@@ -18,9 +18,13 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
-def get_student_resnet(blocks=None, block=models.resnet.BasicBlock):
+def get_student_resnet(blocks=None, bottleneck=False):
     if blocks is None:
         blocks = [1, 2, 2, 2]
+    if bottleneck:
+        block = models.resnet.Bottleneck
+    else:
+        block = models.resnet.BasicBlock
 
     model = models.resnet.ResNet(block, blocks)
 
@@ -158,7 +162,7 @@ def distill_student_resnet(experimenter, data_handler, device='cuda', lr=2e-5, e
 
     for block_layout in blocks:
         logger.info(f"Begin distilling student ResNet model with block layout: {block_layout}")
-        student_model = get_student_resnet(blocks=block_layout)
+        student_model = get_student_resnet(blocks=blocks, bottleneck=experimenter.model_name=="resnet50")
         student_model = load_teacher_into_student(teacher_model, student_model)
         logger.info("Loaded student and teacher ResNet models.")
 

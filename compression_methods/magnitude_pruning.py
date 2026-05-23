@@ -301,7 +301,7 @@ def evaluate_resnet(model, data_handler, device='cuda'):
 
         accuracy = correct / total
 
-        param_count = sum(p.numel() for p in model.parameters())
+        param_count = sum((p != 0).sum().item() for p in model.parameters())
         inference_time /= total
 
         # Compute one more input for TFLOPs computation
@@ -561,7 +561,7 @@ def evaluate_llama(model, data_handler, device='cuda', top_k=5):
 
     accuracy = top_k_correct / total
 
-    param_count = sum(p.numel() for p in model.parameters())
+    param_count = sum((p != 0).sum().item() for p in model.parameters())
     avg_inference_time = inference_time / total
 
     # Compute one more input for TFLOPs computation

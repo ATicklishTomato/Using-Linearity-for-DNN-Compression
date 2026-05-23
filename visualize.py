@@ -2,12 +2,10 @@ import argparse
 import json
 import glob
 import re
-
 import numpy as np
 from itertools import product
-
 import pandas as pd
-from matplotlib import pyplot as plt, gridspec
+from matplotlib import pyplot as plt
 
 pretty_model_names = {
     'resnet18': 'ResNet-18',
@@ -428,6 +426,39 @@ def avg_rq2_matrix_values(path):
     avg_matrix /= len(files)
     return avg_matrix
 
+def rq2_parallel_coordinates_metrics_avg_cka(path, matrix, teacher_layer_names, mean_preactivations, fractions, procrustes_scores):
+    # Average CKA matrix across columns
+    average_teacher_cka = np.mean(matrix, axis=1)
+
+    mp_scores = [mean_preactivations.get(name, np.nan) for name in teacher_layer_names]
+    f_scores = [fractions.get(name, np.nan) for name in teacher_layer_names]
+    p_scores = [procrustes_scores.get(name, np.nan) for name in teacher_layer_names]
+
+    # Create a parallel coordinates plot of average cka, MP, F, and P
+
+    pd.plotting.parallel_coordinates(
+        pd.DataFrame({
+            "Average CKA": average_teacher_cka,
+            "Mean Preactivation": mp_scores,
+            "Fraction": f_scores,
+            "Procrustes": p_scores,
+            "Name": teacher_layer_names,
+        }),
+        class_column="Name",
+        cols=["Average CKA", "Mean Preactivation", "Fraction", "Procrustes"],
+    )
+    plt.gca().legend_.remove()
+    plt.xlabel("Teacher layer index")
+    plt.ylabel("Values")
+    plt.grid()
+    kd_method = path.split("/")[4]
+    model_name = path.split("/")[5]
+    dataset = path.split("/")[6]
+    plt.savefig(f"{path}parallel_coordinates_{model_name}_{kd_method}_{dataset}.png")
+    plt.close()
+
+
+
 if __name__ == '__main__':
     args = parse_args()
 
@@ -488,6 +519,7 @@ if __name__ == '__main__':
                         print("Average fraction scores example:", list(avg_fraction_scores.items())[:5])
                         print("Average procrustes scores example:", list(avg_procrustes_scores.items())[:5])
                         combined_cka_similarity_matrix(avg_matrix, path, teacher_layer_names, student_layer_names, avg_mean_preactivation, avg_fraction_scores, avg_procrustes_scores)
+                        rq2_parallel_coordinates_metrics_avg_cka(path, avg_matrix, teacher_layer_names, avg_mean_preactivation, avg_fraction_scores, avg_procrustes_scores)
                     else:
                         raise NotImplementedError
                 case 'benchmark':

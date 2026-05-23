@@ -33,9 +33,13 @@ class FeatureLoss(nn.Module):
         loss = F.mse_loss(student_features, teacher_features)
         return loss
 
-def get_student_resnet(blocks=None, block=models.resnet.BasicBlock):
+def get_student_resnet(blocks=None, bottleneck=False):
     if blocks is None:
         blocks = [1, 2, 2, 2]
+    if bottleneck:
+        block = models.resnet.Bottleneck
+    else:
+        block = models.resnet.BasicBlock
 
     model = models.resnet.ResNet(block, blocks)
 
@@ -199,7 +203,7 @@ def distill_student_resnet(experimenter, data_handler, device='cuda', lr=2e-5,
         gflops:             GFLOPs during inference.
     """
     teacher_model = experimenter.model
-    student_model = get_student_resnet(blocks=blocks)
+    student_model = get_student_resnet(blocks=blocks, bottleneck=experimenter.model_name=="resnet50")
 
     if loss_layers is None:
         loss_layers = [1, 3]
