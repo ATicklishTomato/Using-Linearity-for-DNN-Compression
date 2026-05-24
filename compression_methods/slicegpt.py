@@ -74,7 +74,7 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5,
     prune_dict = generate_prune_dict(model, layer_sizes_before)
     logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
     finetune_llama(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device)
-    acc, param_count, inference_time, gflops = evaluate_llama(model, data_handler)
+    acc, param_count, inference_time, gflops = evaluate_llama(model, data_handler, masking=False)
 
     logger.info("Completed pruning evaluation")
     return prune_dict, acc, param_count, inference_time, gflops

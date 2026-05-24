@@ -282,7 +282,7 @@ def load_linearity_scores_from_disk(path: str, conv_names: Optional[list] = None
 
 def run_experiment(model: str, dataset: str, relation_to: str, batch_size: int,
                    epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str,
-                   skip_finetune_path: Optional[str], pruning_ratio: float=0.1, blocks: Union[None, list]=None, hidden_layer_reduction: int=2):
+                   skip_finetune_path: Optional[str], pruning_ratio: float=0.2, blocks: Union[None, list]=None, hidden_layer_reduction: int=2):
     """Run the relation to other compression methods experiment.
     Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
     Args:

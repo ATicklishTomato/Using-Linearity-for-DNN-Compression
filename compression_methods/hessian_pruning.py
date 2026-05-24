@@ -81,6 +81,6 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5,
 
     finetune_resnet(model, data_handler, device=device, lr=lr, batch_size=batch_size, epochs=epochs)
 
-    acc, params, infer_time, gflops = evaluate_resnet(model, data_handler, device=device)
+    acc, params, infer_time, gflops = evaluate_resnet(model, data_handler, device=device, masking=False)
 
     return pruned_ratios, acc, params, infer_time, gflops

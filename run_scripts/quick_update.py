@@ -1,8 +1,8 @@
 
 
 path = "./rq1/approx/*/*/resnet50/*/*.bash"
-target = '--gres=gpu:l4.22gb:1'
-replace = '--gres=gpu:l4.22gb:2'
+target = '--gres=gpu:l4.22gb:2'
+replace = '--gres=gpu:l4.22gb:1'
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path

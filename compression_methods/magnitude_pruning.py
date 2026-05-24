@@ -263,12 +263,13 @@ def finetune_resnet(model, data_handler, lr=2e-5, batch_size=64, epochs=10, devi
 
     logger.info("Finished finetuning the ResNet model.")
 
-def evaluate_resnet(model, data_handler, device='cuda'):
+def evaluate_resnet(model, data_handler, device='cuda', masking=True):
         """Validate the ResNet model and compute accuracy, parameter count, inference time, and GFLOPs.
         Args:
             model:          Model to be validated.
             data_handler:   DataManager object.
             device:         Device to use.
+            masking:        Whether the parameter count should assume masking of weights instead of removal of weights.
         Returns:
             accuracy:           Top-1 accuracy of the model on the validation set.
             param_count:        Number of parameters in the model on the validation set.
@@ -301,7 +302,10 @@ def evaluate_resnet(model, data_handler, device='cuda'):
 
         accuracy = correct / total
 
-        param_count = sum((p != 0).sum().item() for p in model.parameters())
+        if masking:
+            param_count = sum((p != 0).sum().item() for p in model.parameters())
+        else:
+            param_count = sum(p.numel() for p in model.parameters())
         inference_time /= total
 
         # Compute one more input for TFLOPs computation
@@ -511,13 +515,14 @@ def finetune_llama(model, data_handler, lr=2e-5, batch_size=4, epochs=10, device
 
     logger.info("Finetuning of LLaMA model completed.")
 
-def evaluate_llama(model, data_handler, device='cuda', top_k=5):
+def evaluate_llama(model, data_handler, device='cuda', top_k=5, masking=True):
     """Validate the LLaMA model and compute accuracy, parameter count, average inference time per token, and GFLOPs.
     Args:
         model: LLaMA model
         data_handler: DataHandler object
         device: torch.device
         top_k (int, optional): The top k accuracy values. Defaults to 5.
+        masking: Whether the parameter count should assume masking of weights instead of removal of weights. Defaults to True.
     Returns:
         accuracy:           Top-k accuracy of the model on the validation set.
         param_count:        Total number of parameters in the model.
@@ -561,7 +566,10 @@ def evaluate_llama(model, data_handler, device='cuda', top_k=5):
 
     accuracy = top_k_correct / total
 
-    param_count = sum((p != 0).sum().item() for p in model.parameters())
+    if masking:
+        param_count = sum((p != 0).sum().item() for p in model.parameters())
+    else:
+        param_count = sum(p.numel() for p in model.parameters())
     avg_inference_time = inference_time / total
 
     # Compute one more input for TFLOPs computation
