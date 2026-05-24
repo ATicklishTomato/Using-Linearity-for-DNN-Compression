@@ -2,6 +2,8 @@ import argparse
 import json
 import glob
 import re
+from typing import List
+
 import numpy as np
 from itertools import product
 import pandas as pd
@@ -25,8 +27,8 @@ pretty_dataset_names = {
 }
 
 pretty_linearity_names = {
-    'mean_preactivation': 'mean of preactivations',
-    'fraction': 'fraction of neuron activations',
+    'mean_preactivation': 'Mean of preactivations',
+    'fraction': 'Fraction of neuron activations',
     'procrustes': 'Procrustes-based linearity score'
 }
 
@@ -201,42 +203,109 @@ def avg_rq2_linearity_scores(path):
 
     return avg_mean_preactivation, avg_fraction, avg_procrustes, student_layer_names, teacher_layer_names
 
-def combined_scatterplot_linearity_pruning_scores(mean_preactivation: dict, fractions: dict, procrustes: dict, pruning_ratios: dict, save_dir: str) -> None:
-    """Creates a scatterplot of all linearity scores and pruning scores for each layer.
-    Points are labeled with their layer index. X-axis will be linearity score, Y-axis will be pruning score.
-    Args:
-        mean_preactivation: A dictionary mapping layer names to mean preactivation values.
-        fractions: A dictionary mapping layer names to fraction scores.
-        procrustes: A dictionary mapping layer names to procrustes scores.
-        pruning_ratios: A dictionary mapping layer names to pruning scores.
-        save_dir: The directory to save the scatterplot. Saved as "linearity_pruning_scatterplot.png" in the given directory.
+def scatterplot_linearity_pruning_scores(
+    mean_preactivations: List[dict],
+    fractions: List[dict],
+    procrustes: List[dict],
+    pruning_ratios: List[dict],
+    dataset_labels: List[str],
+    save_dir: str,
+) -> None:
     """
-    layer_names = list(set(mean_preactivation.keys()).intersection(set(pruning_ratios.keys())))
-    mean_preactivations = [mean_preactivation[name] for name in layer_names]
-    fractions = [fractions[name] for name in layer_names]
-    procrustes = [procrustes[name] for name in layer_names]
-    pruning_values = [pruning_ratios[name] for name in layer_names]
-    # Split layer names on '.' and only retain numbers, join with '.'
-    layer_names = [".".join([part for part in name.split(".") if part.isdigit()]) for name in layer_names]
+    Creates a figure with three scatterplots in a single row:
+        1. Mean preactivation vs pruning ratio
+        2. Fraction activation vs pruning ratio
+        3. Procrustes score vs pruning ratio
+
+    Each dataset is plotted separately and distinguished by color/label.
+
+    Args:
+        mean_preactivations:
+            List of dictionaries mapping layer names to mean preactivation scores.
+
+        fractions:
+            List of dictionaries mapping layer names to fraction activation scores.
+
+        procrustes:
+            List of dictionaries mapping layer names to procrustes scores.
+
+        pruning_ratios:
+            List of dictionaries mapping layer names to pruning ratios.
+
+        dataset_labels:
+            Labels for each dataset.
+
+        save_dir:
+            Directory to save the resulting figure.
+    """
+    fig, axes = plt.subplots(
+        len(dataset_labels),
+        3,
+        figsize=(6 * 3, 5 * len(dataset_labels)),
+        squeeze=False,
+        sharey="row",
+    )
+
+    metric_info = [
+        (pretty_linearity_names['mean_preactivation'], mean_preactivations),
+        (pretty_linearity_names['fraction'], fractions),
+        (pretty_linearity_names['procrustes'], procrustes),
+    ]
+
+    for row_idx, dataset_label in enumerate(dataset_labels):
+
+        pruning_dict = pruning_ratios[row_idx]
+
+        for col_idx, (metric_name, metric_dicts) in enumerate(metric_info):
+            ax = axes[row_idx, col_idx]
+
+            metric_dict = metric_dicts[row_idx]
+
+            layer_names = list(
+                set(metric_dict.keys()).intersection(pruning_dict.keys())
+            )
+
+            x_values = [metric_dict[name] for name in layer_names]
+            y_values = [pruning_dict[name] for name in layer_names]
+
+            ax.scatter(x_values, y_values, alpha=0.8)
+
+            ax.grid(True)
+
+            # Remove axis labels
+            ax.set_xlabel("")
+            ax.set_ylabel("")
+
+            # Column labels (top row only)
+            if row_idx == 0:
+                ax.set_title(metric_name, fontsize=14)
+
+            # Row labels (left column only)
+            if col_idx == 0:
+                ax.annotate(
+                    dataset_label,
+                    xy=(-0.175, 0.5),
+                    xycoords="axes fraction",
+                    rotation=90,
+                    va="center",
+                    ha="center",
+                    fontsize=14,
+                )
+
+    fig.supylabel("Fraction of Pruned Weights", fontsize=16, x=0.0)
+
+    plt.tight_layout()
+
     prune_method = save_dir.split("/")[4]
     model_name = save_dir.split("/")[5]
-    dataset = save_dir.split("/")[6]
 
-    plt.figure(figsize=(10, 6))
-    plt.scatter(mean_preactivations, pruning_values, color='blue', label='Mean Preactivation')
-    plt.scatter(fractions, pruning_values, color='orange', label='Fraction of Neuron Activations')
-    plt.scatter(procrustes, pruning_values, color='green', label='Procrustes-based Linearity Score')
+    save_dir = "/".join(save_dir.split("/")[:-2]) + f"/scatterplot_{model_name}_{prune_method}.png"
 
-    plt.legend()
-
-    # for i, name in enumerate(layer_names):
-    #     plt.annotate(name, (mean_preactivations[i], pruning_values[i]))
-
-    plt.xlabel('Linearity Score')
-    plt.ylabel('Fraction of pruned weights')
-    plt.grid()
-    plt.tight_layout()
-    plt.savefig(f"{save_dir}scatterplot_{model_name}_{prune_method}_{dataset}.png")
+    plt.savefig(
+        save_dir,
+        dpi=300,
+        bbox_inches="tight",
+    )
     plt.close()
 
 def combined_cka_similarity_matrix(matrix, save_dir, teacher_layer_names, student_layer_names,
@@ -434,27 +503,97 @@ def rq2_parallel_coordinates_metrics_avg_cka(path, matrix, teacher_layer_names, 
     f_scores = [fractions.get(name, np.nan) for name in teacher_layer_names]
     p_scores = [procrustes_scores.get(name, np.nan) for name in teacher_layer_names]
 
-    # Create a parallel coordinates plot of average cka, MP, F, and P
+    df = pd.DataFrame({
+        "Average CKA": average_teacher_cka,
+        "Mean Preactivation": mp_scores,
+        "Fraction": f_scores,
+        "Procrustes": p_scores,
+        "Name": teacher_layer_names,
+    })
 
-    pd.plotting.parallel_coordinates(
-        pd.DataFrame({
-            "Average CKA": average_teacher_cka,
-            "Mean Preactivation": mp_scores,
-            "Fraction": f_scores,
-            "Procrustes": p_scores,
-            "Name": teacher_layer_names,
-        }),
-        class_column="Name",
-        cols=["Average CKA", "Mean Preactivation", "Fraction", "Procrustes"],
-    )
-    plt.gca().legend_.remove()
-    plt.xlabel("Teacher layer index")
+    metric_cols = [
+        "Average CKA",
+        "Mean Preactivation",
+        "Fraction",
+        "Procrustes",
+    ]
+
+    # Normalize metrics for cleaner visualization
+    # df_norm = df.copy()
+    # for col in metric_cols:
+    #     col_min = df[col].min()
+    #     col_max = df[col].max()
+    #
+    #     if col_max > col_min:
+    #         df_norm[col] = (df[col] - col_min) / (col_max - col_min)
+    #     else:
+    #         df_norm[col] = 0.5
+
+    df_norm = df
+
+    # Find top 3 and bottom 3 by Average CKA
+    sorted_idx = np.argsort(average_teacher_cka)
+
+    bottom3 = set(sorted_idx[:3])
+    top3 = set(sorted_idx[-3:])
+
+    x = np.arange(len(metric_cols))
+
+    plt.figure(figsize=(10, 6))
+
+    for idx, row in df_norm.iterrows():
+
+        y = row[metric_cols].values
+
+        # Highlight top 3
+        if idx in top3:
+            plt.plot(
+                x,
+                y,
+                linewidth=3,
+                alpha=1.0,
+                color="blue",
+                label="Highest 3 Average CKA" if idx == list(top3)[0] else None,
+                zorder=3,
+            )
+
+        # Highlight bottom 3
+        elif idx in bottom3:
+            plt.plot(
+                x,
+                y,
+                linewidth=3,
+                alpha=1.0,
+                color="orange",
+                label="Lowest 3 Average CKA" if idx == list(bottom3)[0] else None,
+                zorder=3,
+            )
+
+        # Fade all others
+        else:
+            plt.plot(
+                x,
+                y,
+                linewidth=1,
+                alpha=0.2,
+                color="gray",
+                zorder=1,
+            )
+
+    plt.xticks(x, metric_cols)
     plt.ylabel("Values")
-    plt.grid()
+    plt.grid(alpha=0.3)
+    plt.legend()
+
     kd_method = path.split("/")[4]
     model_name = path.split("/")[5]
     dataset = path.split("/")[6]
-    plt.savefig(f"{path}parallel_coordinates_{model_name}_{kd_method}_{dataset}.png")
+
+    plt.tight_layout()
+
+    plt.savefig(
+        f"{path}parallel_coordinates_{model_name}_{kd_method}_{dataset}.png"
+    )
     plt.close()
 
 
@@ -506,12 +645,31 @@ if __name__ == '__main__':
                 case 'rq2':
                     if relation_to in ['magnitude_pruning', 'hessian_pruning', 'taylor_pruning', 'wanda_pruning', 'slicegpt']:
                         # Compute average scatterplot
-                        avg_mean_preactivation, avg_fraction_scores, avg_procrustes_scores, avg_pruning_ratios = avg_rq2_prune_scores(path)
-                        print("Average mean preactivation example:", list(avg_mean_preactivation.items())[:5])
-                        print("Average fraction scores example:", list(avg_fraction_scores.items())[:5])
-                        print("Average procrustes scores example:", list(avg_procrustes_scores.items())[:5])
-                        print("Average Pruning Ratios example:", list(avg_pruning_ratios.items())[:5])
-                        combined_scatterplot_linearity_pruning_scores(avg_mean_preactivation, avg_fraction_scores, avg_procrustes_scores, avg_pruning_ratios, path)
+                        if 'llama' in model:
+                            avg_mp_ts, avg_f_ts, avg_p_ts, avg_pr_ts = avg_rq2_prune_scores("/".join(path.split("/")[:-2]) + "/tinystories/")
+                            avg_mp_sg, avg_f_sg, avg_p_sg, avg_pr_sg = avg_rq2_prune_scores("/".join(path.split("/")[:-2]) + "/superglue/")
+                            avg_mean_preactivations = [avg_mp_ts, avg_mp_sg]
+                            avg_fraction_scores = [avg_f_ts, avg_f_sg]
+                            avg_procrustes_scores = [avg_p_ts, avg_p_sg]
+                            avg_pruning_ratios = [avg_pr_ts, avg_pr_sg]
+                            dataset_names = [pretty_dataset_names['tinystories'], pretty_dataset_names['superglue']]
+                        else:
+                            avg_mp_in, avg_f_in, avg_p_in, avg_pr_in = avg_rq2_prune_scores("/".join(path.split("/")[:-2]) + "/imagenet/")
+                            avg_mp_ci, avg_f_ci, avg_p_ci, avg_pr_ci = avg_rq2_prune_scores("/".join(path.split("/")[:-2]) + "/cifar10/")
+                            avg_mean_preactivations = [avg_mp_in, avg_mp_ci]
+                            avg_fraction_scores = [avg_f_in, avg_f_ci]
+                            avg_procrustes_scores = [avg_p_in, avg_p_ci]
+                            avg_pruning_ratios = [avg_pr_in, avg_pr_ci]
+                            dataset_names = [pretty_dataset_names['imagenet'], pretty_dataset_names['cifar10']]
+
+                        scatterplot_linearity_pruning_scores(
+                            mean_preactivations=avg_mean_preactivations,
+                            fractions=avg_fraction_scores,
+                            procrustes=avg_procrustes_scores,
+                            pruning_ratios=avg_pruning_ratios,
+                            dataset_labels=dataset_names,
+                            save_dir=path
+                        )
                     elif relation_to in ['basic_kd', 'feature_kd', 'born_again_kd']:
                         avg_matrix = avg_rq2_matrix_values(path)
                         avg_mean_preactivation, avg_fraction_scores, avg_procrustes_scores, student_layer_names, teacher_layer_names = avg_rq2_linearity_scores(path)
