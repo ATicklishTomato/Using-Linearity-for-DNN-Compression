@@ -37,15 +37,29 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5,
     logger.info(f"Made copy of model: {model}")
     if 'resnet' in experimenter.model_name:
         logger.info("Running ResNet pruning")
-        prune_dict = prune_resnet(model, data_handler, device, pruning_ratio)
+        prune_dict, masks = prune_resnet(model, data_handler, device, pruning_ratio)
         logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
+
+        mask_handles = register_resnet_hooks(model, masks)
+
         finetune_resnet(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device)
+
+        for hook in mask_handles:
+            hook.remove()
+
         acc, param_count, inference_time, gflops = evaluate_resnet(model, data_handler, device)
     else:
         logger.info("Running Llama pruning")
-        prune_dict = prune_llama(model, data_handler, device, pruning_ratio)
+        prune_dict, masks = prune_llama(model, data_handler, device, pruning_ratio)
         logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
+
+        mask_handles = register_llama_hooks(masks)
+
         finetune_llama(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device)
+
+        for hook in mask_handles:
+            hook.remove()
+
         acc, param_count, inference_time, gflops = evaluate_llama(model, data_handler)
 
     logger.info("Completed pruning evaluation")
@@ -97,6 +111,7 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
     # ---------------------------------------------------------
     original_counts = {}
     pruned_counts = {}
+    masks = {}
 
     for name, module in model.named_modules():
         if isinstance(module, nn.Linear) and module.out_features == 1000:
@@ -111,7 +126,7 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
             module.weight.data.mul_(mask)
 
             pruned_counts[name] = mask.sum().item()
-
+            masks[name] = mask
         elif isinstance(module, nn.Linear):
             w = module.weight.data
 
@@ -121,6 +136,7 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
             module.weight.data.mul_(mask)
 
             pruned_counts[name] = mask.sum().item()
+            masks[name] = mask
 
     # ---------------------------------------------------------
     # Compute per-layer sparsity ratios (same return style)
@@ -134,7 +150,32 @@ def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
 
     logger.info("Completed UNSTRUCTURED pruning (PAT benchmark)")
 
-    return pruned_ratios
+    return pruned_ratios, masks
+
+def register_resnet_hooks(model, masks):
+    """
+    Registers gradient hooks that zero out gradients for pruned weights
+    before the optimizer step. Returns handles for later cleanup.
+    """
+    logger.info("Registering gradient hooks")
+    named_modules = dict(model.named_modules())
+    handles = []
+
+    for name, mask in masks.items():
+        module = named_modules[name]
+
+        # Capture mask in closure
+        def make_hook(m):
+            def hook(grad):
+                return grad * m
+            return hook
+
+        handle = module.weight.register_hook(make_hook(mask))
+        handles.append(handle)
+
+    logger.info("Completed registering gradient hooks")
+
+    return handles
 
 def prune_resnet_struct(model, data_handler, device='cuda', pruning_ratio=0.5):
     """
@@ -387,6 +428,7 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
     ).values.max()
 
     pruned_ratios = {}
+    masks = []
 
     for i, layer in enumerate(layers):
         if type(layer) in [LinearAttentionBlock, IdentityBlock]:
@@ -422,6 +464,11 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
         )
 
         pruned_ratios[f"model.layers.{i}.self_attn"] =  1 - (after / before) # We want fraction of pruned weights
+        masks.extend([
+            (gate, gate_mask),
+            (up, up_mask),
+            (down, down_mask),
+        ])
 
 
     model.config.hidden_size = model.lm_head.in_features
@@ -468,7 +515,19 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
 
     logger.info("Completed unstructured pruning")
 
-    return pruned_ratios
+    return pruned_ratios, masks
+
+def register_llama_hooks(masks):
+    logger.info("Registering LLAMA hooks")
+    handles = []
+    for module, mask in masks:
+        def make_hook(m):
+            def hook(grad):
+                return grad * m
+            return hook
+        handles.append(module.weight.register_hook(make_hook(mask)))
+    logger.info("Completed LLAMA hooks")
+    return handles
 
 def finetune_llama(model, data_handler, lr=2e-5, batch_size=4, epochs=10, device='cuda'):
     """Finetune the LLaMA model such that it can be used for linearity metric evaluations."""

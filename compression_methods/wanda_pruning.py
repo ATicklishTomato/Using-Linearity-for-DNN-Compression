@@ -5,7 +5,7 @@ import torch
 import logging
 from torch import nn
 
-from compression_methods.magnitude_pruning import finetune_llama, evaluate_llama
+from compression_methods.magnitude_pruning import finetune_llama, evaluate_llama, register_llama_hooks
 from experiments.llama_approx_compression import LinearAttentionBlock, IdentityBlock
 
 """
@@ -215,6 +215,7 @@ def prune_llama(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_ba
             kw['position_embeddings'] = position_embeddings
         return kw
 
+    masks = []
     layers = model.model.layers
     for i in range(len(layers)):
         layer = layers[i]
@@ -282,6 +283,7 @@ def prune_llama(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_ba
                     W_mask.scatter_(1, indices, True)
 
             subset[name].weight.data[W_mask] = 0  ## set weights to zero
+            masks.append((subset[name], ~W_mask))
 
         for j in range(num_batches):
             with torch.no_grad():
@@ -291,7 +293,7 @@ def prune_llama(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_ba
     model.config.use_cache = use_cache
     torch.cuda.empty_cache()
 
-    return model
+    return model, masks
 
 
 def generate_prune_dict(model):
@@ -336,10 +338,17 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5,
     logger.info(f"Made copy of model: {model}")
 
     logger.info("Running Llama pruning")
-    model = prune_llama(model, data_handler, device=device, sparsity_ratio=pruning_ratio)
+    model, masks = prune_llama(model, data_handler, device=device, sparsity_ratio=pruning_ratio)
     prune_dict = generate_prune_dict(model)
     logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
+
+    mask_handles = register_llama_hooks(masks)
+
     finetune_llama(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device)
+
+    for hook in mask_handles:
+        hook.remove()
+
     acc, param_count, inference_time, gflops = evaluate_llama(model, data_handler)
 
     logger.info("Completed pruning evaluation")
