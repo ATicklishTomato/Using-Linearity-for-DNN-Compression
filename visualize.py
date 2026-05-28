@@ -499,6 +499,11 @@ def rq2_parallel_coordinates_metrics_avg_cka(path, matrix, teacher_layer_names, 
     # Average CKA matrix across columns
     average_teacher_cka = np.mean(matrix, axis=1)
 
+    available_teacher_layers_names = set(teacher_layer_names).intersection(fractions.keys())
+    # Keep only cka average of available layers
+    average_teacher_cka = average_teacher_cka[[teacher_layer_names.index(name) for name in available_teacher_layers_names]]
+    teacher_layer_names = [name for name in teacher_layer_names if name in available_teacher_layers_names]
+
     mp_scores = [mean_preactivations.get(name, np.nan) for name in teacher_layer_names]
     f_scores = [fractions.get(name, np.nan) for name in teacher_layer_names]
     p_scores = [procrustes_scores.get(name, np.nan) for name in teacher_layer_names]
@@ -519,17 +524,17 @@ def rq2_parallel_coordinates_metrics_avg_cka(path, matrix, teacher_layer_names, 
     ]
 
     # Normalize metrics for cleaner visualization
-    # df_norm = df.copy()
-    # for col in metric_cols:
-    #     col_min = df[col].min()
-    #     col_max = df[col].max()
-    #
-    #     if col_max > col_min:
-    #         df_norm[col] = (df[col] - col_min) / (col_max - col_min)
-    #     else:
-    #         df_norm[col] = 0.5
+    df_norm = df.copy()
+    for col in metric_cols:
+        col_min = df[col].min()
+        col_max = df[col].max()
 
-    df_norm = df
+        if col_max > col_min:
+            df_norm[col] = (df[col] - col_min) / (col_max - col_min)
+        else:
+            df_norm[col] = 0.5
+
+    # df_norm = df
 
     # Find top 3 and bottom 3 by Average CKA
     sorted_idx = np.argsort(average_teacher_cka)
@@ -581,7 +586,7 @@ def rq2_parallel_coordinates_metrics_avg_cka(path, matrix, teacher_layer_names, 
             )
 
     plt.xticks(x, metric_cols)
-    plt.ylabel("Values")
+    plt.ylabel("Normalized Values")
     plt.grid(alpha=0.3)
     plt.legend()
 
