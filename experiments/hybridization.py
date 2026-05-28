@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def run_experiment(model: str, linearity: str, dataset: str, threshold: str, compression_method: str, batch_size: int,
                    epochs: int, lr: float, data_fraction: float, save: bool, seed: int, device: str,
-                   skip_finetune_path: Optional[str], pruning_ratio: float=0.1, blocks: Union[None, list]=None,
+                   skip_finetune_path: Optional[str], approx=True, pruning_ratio: float=0.1, blocks: Union[None, list]=None,
                    hidden_layer_reduction: int=2):
     """Attempt hybridization with other compression methods experiment.
     Results are logged and stored to wandb if enabled, and models/results are saved to ./results if enabled.
@@ -32,6 +32,7 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, com
         seed (int): The random seed for reproducibility.
         device (str): The device to run the experiments on (e.g., 'cpu', 'cuda').
         skip_finetune_path (str): The path to look for a finetuned model saved to disk if skipping is enabled.
+        approx (bool): Whether to use linear approximators for linearity compression or not.
         pruning_ratio (float): The ratio of pruning scores to use for each layer.
         blocks (Union[None, list]): The list of blocks to use for distilled resnet.
         hidden_layer_reduction (int): The number of hidden layers to remove for distilled llama.
@@ -141,15 +142,16 @@ def run_experiment(model: str, linearity: str, dataset: str, threshold: str, com
     # ------------------------------------------------------------
 
     if "resnet" in experimenter.model_name:
-        # from experiments.resnet_approx_compression import group_contiguous_layers, train_approximation_layers
-        # all_layers = list(linear_layers.keys()) + list(nonlinear_layers.keys())
-        # groups = group_contiguous_layers(linear_layers, all_layers, experimenter.model)
-        # train_approximation_layers(experimenter, data_handler, groups, epochs=epochs, lr=lr,
-        #                            batch_size=batch_size, device=device)
-        # logger.info("Linear approximation layers trained and integrated into the model.")
-        from experiments.resnet_fold_compression import merge_linear_conv_sequences
-        merged_pairs = merge_linear_conv_sequences(experimenter.model, linear_layers)
-        logger.info(f"Merged layer pairs: {merged_pairs}")
+        if approx:
+            from experiments.resnet_approx_compression import group_contiguous_layers, train_approximation_layers
+            all_layers = list(linear_layers.keys()) + list(nonlinear_layers.keys())
+            groups = group_contiguous_layers(linear_layers, all_layers, experimenter.model)
+            train_approximation_layers(experimenter, data_handler, groups, epochs=epochs, lr=lr,
+                                       batch_size=batch_size, device=device)
+        else:
+            from experiments.resnet_fold_compression import merge_linear_conv_sequences
+            merged_pairs = merge_linear_conv_sequences(experimenter.model, linear_layers)
+            logger.info(f"Merged layer pairs: {merged_pairs}")
     else:
         from experiments.llama_approx_compression import group_contiguous_layers, train_approximation_layers
         groups = group_contiguous_layers(linear_layers)

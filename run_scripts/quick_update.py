@@ -1,8 +1,8 @@
 
 
-path = "./rq1/approx/*/*/resnet50/*/*.bash"
-target = '--threshold'
-replace = '--batch_size 64 --threshold'
+path = "./rq2/hybridization/*/resnet34/*/*.bash"
+target = '-e relation'
+replace = '-e hybridization -l fraction --threshold "25%"'
 
 if __name__ == "__main__":
     # Find all .bash files in the specified path
