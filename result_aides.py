@@ -1,5 +1,6 @@
-import fractions
-
+import glob
+import json
+import numpy as np
 import matplotlib.pyplot as plt
 
 def plot_layer_metrics(layer_labels, mean_preactivations, fractions, procrustes,
@@ -34,38 +35,32 @@ def plot_layer_metrics(layer_labels, mean_preactivations, fractions, procrustes,
     plt.savefig(path, dpi=300)
     plt.close()
 
+def make_analysis_graphs(model):
+    fractions_path = f"./results/rq1/*/*/{model}/tinystories/*/activation_fractions.json"
+    preactivations_path = f"./results/rq1/*/*/{model}/tinystories/*/mean_preactivations.json"
+    procrustes_path = f"./results/rq1/*/*/{model}/tinystories/*/procrustes_scores.json"
 
-if __name__ == '__main__':
+    fraction_files = glob.glob(fractions_path)
+    preactivations_files = glob.glob(preactivations_path)
+    procrustes_files = glob.glob(procrustes_path)
 
-    # fractions_path = f"./results/rq1/*/*/llama-3-1b/tinystories/*/activation_fractions.json"
-    # preactivations_path = f"./results/rq1/*/*/llama-3-1b/tinystories/*/mean_preactivations.json"
-    # procrustes_path = f"./results/rq1/*/*/llama-3-1b/tinystories/*/procrustes_scores.json"
+    labels = list(json.load(open(fraction_files[0])).keys())
+    labels = [l.replace("model.", '') for l in labels]
+    fraction_scores = np.mean([list(json.load(open(f)).values()) for f in fraction_files], axis=0)
+    preactivations_scores = np.mean([list(json.load(open(f)).values()) for f in preactivations_files], axis=0)
+    procrustes_scores = np.mean([list(json.load(open(f)).values()) for f in procrustes_files], axis=0)
 
-    # import glob
-    # import json
-    # import numpy as np
-    #
-    # fraction_files = glob.glob(fractions_path)
-    # preactivations_files = glob.glob(preactivations_path)
-    # procrustes_files = glob.glob(procrustes_path)
-    #
-    # labels = list(json.load(open(fraction_files[0])).keys())
-    # labels = [l.replace("model.", '') for l in labels]
-    # fraction_scores = np.mean([list(json.load(open(f)).values()) for f in fraction_files], axis=0)
-    # preactivations_scores = np.mean([list(json.load(open(f)).values()) for f in preactivations_files], axis=0)
-    # procrustes_scores = np.mean([list(json.load(open(f)).values()) for f in procrustes_files], axis=0)
-    #
-    # print(labels)
-    # print(fraction_scores)
-    # print(preactivations_scores)
-    # print(procrustes_scores)
-    # print(len(labels), len(fraction_scores), len(preactivations_scores), len(procrustes_scores))
-    #
-    # plot_layer_metrics(labels, preactivations_scores, fraction_scores, procrustes_scores, "./llama-3-1b_tinystories_metrics_comparison.png")
+    print(labels)
+    print(fraction_scores)
+    print(preactivations_scores)
+    print(procrustes_scores)
+    print(len(labels), len(fraction_scores), len(preactivations_scores), len(procrustes_scores))
 
-    path = './results/rq1/*/*/llama-3-1b/*/results.tex'
+    plot_layer_metrics(labels, preactivations_scores, fraction_scores, procrustes_scores, f"./{model}_tinystories_metrics_comparison.png")
 
-    import glob
+def make_latex_table(model, approx=False):
+    approx = "approx/" if approx else ""
+    path = f'./results/rq1/{approx}*/*/{model}/*/results.tex'
 
     tables = glob.glob(path)
     start = ""
@@ -85,7 +80,24 @@ if __name__ == '__main__':
 
         rows += row + "\n"
 
-    with open("./results/rq1/llama-3-1b_results.tex", 'w') as f:
+    with open(f"./results/rq1/{model}_{approx[:-1]}_results.tex", 'w') as f:
         f.write(start + rows + finish)
 
+def get_average_original_results(model, dataset):
+    path = f'./results/rq1/*/*/{model}/{dataset}/*/*results.json'
+    results = glob.glob(path)
+    accuracies = []
+    comp_ratios = []
+    for result in results:
+        data = json.load(open(result))
+        accuracies.append(data["original_accuracy"])
+        comp_ratios.append(data["original_param_count"])
 
+    print(f"Model: {model}, Dataset: {dataset}, Average Accuracy: {np.mean(accuracies):.4f}, Average Comp Ratio: {np.mean(comp_ratios):.4f}")
+
+if __name__ == '__main__':
+
+    for model in ['resnet18', 'resnet34', 'resnet50', 'llama-3-1b']:
+        datasets = ['tinystories', 'superglue'] if model == 'llama-3-1b' else ['cifar10', 'imagenet']
+        for dataset in datasets:
+            get_average_original_results(model, dataset)
