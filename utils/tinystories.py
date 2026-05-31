@@ -7,17 +7,40 @@ import logging
 logger = logging.getLogger(__name__)
 
 def clean_text(text):
+    """Cleans the input text by removing unwanted characters and extra spaces.
+    Args:
+        text: Text to be cleaned.
+    Returns:
+        clean_text: Cleaned text.
+    """
     text = re.sub(r"[^a-zA-Z0-9\s.,!?']", "", text)  # Remove special characters
     text = re.sub(r"\s+", " ", text).strip()  # Remove extra spaces
     return text
 
 # Tokenize and clean the dataset
 def preprocess(examples, tokenizer):
+    """Preprocesses the given examples using the given tokenizer.
+    Args:
+        examples: List of examples to be preprocessed.
+        tokenizer: Tokenizer object for tokenizing examples.
+    Returns:
+        tokenized_examples: Tokenized and cleaned examples.
+    """
     examples["text"] = [clean_text(t) for t in examples["text"]]
     return tokenizer(examples["text"], truncation=True, padding="max_length", max_length=512)
 
 
 def load_datasets(tokenizer, batch_size, reduction_fraction=0.1, seed=42):
+    """Loads and preprocesses the TinyStories dataset, with options for caching and reducing dataset size for faster experimentation.
+    Args:
+        tokenizer: Tokenizer object for tokenizing TinyStories dataset.
+        batch_size: Number of samples per batch.
+        reduction_fraction: Fraction of the dataset to use for training and validation (default: 0.1 for faster experimentation).
+        seed: Random seed (default: 42).
+    Returns:
+        train_set: Preprocessed training dataset.
+        val_set: Preprocessed validation dataset.
+    """
 
     if not os.path.exists("./data"):
         os.makedirs("./data", exist_ok=True)

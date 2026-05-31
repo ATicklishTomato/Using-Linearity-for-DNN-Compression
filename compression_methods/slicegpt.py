@@ -10,6 +10,12 @@ logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 def compute_before(model):
+    """Computes the number of parameters in each layer before pruning.
+    Args:
+        model: A pre-loaded, fine-tuned HF CausalLM model.
+    Returns:
+        layer_sizes: Dictionary of layer sizes.
+    """
     layers = model.model.layers
     layer_sizes = {}
     for i, layer in enumerate(layers):
@@ -28,6 +34,13 @@ def compute_before(model):
     return layer_sizes
 
 def generate_prune_dict(model, before_sizes):
+    """Generates a prune dict based on the number of parameters in each layer before and after pruning.
+    Args:
+        model: A pre-loaded, fine-tuned HF CausalLM model.
+        before_sizes: Dictionary of layer sizes.
+    Returns:
+        prune_dict: A dictionary containing the pruning ratios for each layer.
+    """
     layers = model.model.layers
     prune_dict = {}
     for i, layer in enumerate(layers):
@@ -70,7 +83,7 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5,
 
     logger.info("Running Llama pruning")
     layer_sizes_before = compute_before(model)
-    model = run_slicegpt(model, data_handler, sparsity=pruning_ratio, device=device)
+    model = run_slicegpt(model, data_handler, sparsity=pruning_ratio)
     prune_dict = generate_prune_dict(model, layer_sizes_before)
     logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
     finetune_llama(model, data_handler, lr=lr, batch_size=batch_size, epochs=epochs, device=device)
@@ -84,7 +97,6 @@ def run_slicegpt(
     model,
     data_handler,
     sparsity: float,
-    device: str = "cuda:0",
 ):
     """
     Runs SliceGPT slicing on a pre-loaded model.
@@ -94,7 +106,6 @@ def run_slicegpt(
         model:                  A pre-loaded, fine-tuned HF CausalLM model.
         data_handler:           DataManager object containing the calibration dataset.
         sparsity:               Fraction of hidden dim to remove, e.g. 0.2 = 20%.
-        device:                 Device to run calibration/slicing on.
     """
     model.eval()
     model_adapter = LlamaModelAdapter(model)

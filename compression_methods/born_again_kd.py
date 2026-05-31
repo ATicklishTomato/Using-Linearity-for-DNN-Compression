@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 def get_student_resnet(blocks=None, bottleneck=False):
+    """Get student ResNet model from ResNet model.
+    Args:
+        blocks: The blocks list to be passed to ResNet constructor. Default is None, gets set to [1,2,2,2].
+        bottleneck: Whether to use bottleneck blocks. Default is False, meaning that BasicBlock will be used.
+    Returns:
+        model: ResNet model
+    """
     if blocks is None:
         blocks = [1, 2, 2, 2]
     if bottleneck:
@@ -32,6 +39,13 @@ def get_student_resnet(blocks=None, bottleneck=False):
 
 
 def load_teacher_into_student(teacher, student):
+    """Load the teacher model weights into the student model, skipping any mismatched layers (important for reduced blocks).
+    Args:
+        teacher: ResNet model
+        student: ResNet model
+    Returns:
+        student: ResNet model with teacher weights loaded where possible
+    """
     teacher_dict = teacher.state_dict()
     student_dict = student.state_dict()
 
@@ -52,6 +66,15 @@ def load_teacher_into_student(teacher, student):
 
 
 def train_student_resnet(teacher_model, student_model, data_handler, optimizer, device='cuda', epochs=5):
+    """Train a student ResNet model from a teacher ResNet model.
+    Args:
+        teacher_model: ResNet model
+        student_model: ResNet model
+        data_handler: DataHandler object
+        optimizer: torch.optim.Optimizer
+        device: torch.device
+        epochs: number of epochs
+    """
     teacher_model.to(device).eval()
     student_model.to(device).train()
 

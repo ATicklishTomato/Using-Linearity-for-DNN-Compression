@@ -9,7 +9,6 @@ import numpy as np
 import torch
 import wandb
 import matplotlib
-from torch import nn
 
 from metrics.procrustes import expand_scores_to_individual_layers
 
@@ -17,7 +16,6 @@ matplotlib.use("Agg") # Avoid errors when running without UI
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 
-from metrics.linearity_metric_manager import LinearityMetric
 from utils.data_manager import DataManager
 from utils.llama_model import LlamaExperimenter
 from utils.resnet_model import ResNetExperimenter

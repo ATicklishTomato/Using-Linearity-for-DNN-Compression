@@ -132,8 +132,11 @@ class LinearConvolutionalBlock(nn.Module):
 
     def forward(self, x):
         """
-        x: (B, C_in, H_in, W_in)
-        returns: (B, C_out, H_out, W_out)
+        Performs a forward pass of the linear approximation of a convolutional block.
+        Args:
+            x: (B, C_in, H_in, W_in)
+        Returns:
+            output: (B, C_out, H_out, W_out)
         """
         B = x.shape[0]
 
@@ -219,6 +222,16 @@ def get_block_input_output(model, model_input, layer_group, device="cuda") -> Tu
     return group_input, group_output
 
 def get_all_block_inputs_outputs(model, model_input, layer_groups, device="cuda"):
+    """Gets the input and output of the specified convolutional layers for training the linear approximation.
+    Args:
+        model: The ResNet model to get inputs and outputs from
+        model_input: The model input to pass through the model
+        layer_groups: The groups that need their inputs and outputs recorded
+        device: The device to use.
+    Returns:
+        group_inputs: The embeddings that gets passed into the blocks
+        group_outputs: The embeddings that gets passed out of the blocks
+    """
     captured = {i: {"input": None, "output": None} for i in range(len(layer_groups))}
 
     logger.debug("Getting all block inputs and outputs")

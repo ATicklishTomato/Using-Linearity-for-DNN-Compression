@@ -5,12 +5,27 @@ from torchvision.datasets import CIFAR10
 
 
 def make_subset(dataset, fraction=0.1, seed=42):
+    """Returns a random subset of the given dataset.
+    Args:
+        dataset: the dataset to be subset
+        fraction: fraction of the dataset to be returned
+        seed: random seed
+    Returns:
+        A random subset of the given dataset.
+    """
     torch.manual_seed(seed)
     indices = torch.randperm(len(dataset))[:int(len(dataset) * fraction)]
     return Subset(dataset, indices)
 
 
 def load_datasets(reduction_fraction=0.1, seed=42):
+    """Loads the CIFAR-10 dataset and applies the necessary transformations.
+    Args:
+        reduction_fraction: fraction of the dataset to be returned
+        seed: random seed
+    Returns:
+        A tuple of (train_dataset, val_dataset) where each dataset is a random subset of the original CIFAR-10 dataset.
+    """
     # ResNets pretrained on ImageNet expect 224x224 RGB images
     # CIFAR-10 images are 32x32, so resize them.
     train_tfms = transforms.Compose([

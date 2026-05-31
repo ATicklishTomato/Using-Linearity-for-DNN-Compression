@@ -37,7 +37,7 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5,
     logger.info(f"Made copy of model: {model}")
     if 'resnet' in experimenter.model_name:
         logger.info("Running ResNet pruning")
-        prune_dict, masks = prune_resnet(model, data_handler, device, pruning_ratio)
+        prune_dict, masks = prune_resnet(model, pruning_ratio)
         logger.info(f"Completed pruning with pruning ratio: {pruning_ratio}")
 
         mask_handles = register_resnet_hooks(model, masks)
@@ -66,10 +66,16 @@ def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5, lr=2e-5,
     return prune_dict, acc, param_count, inference_time, gflops
 
 @torch.no_grad()
-def prune_resnet(model, data_handler, device='cuda', pruning_ratio=0.5):
+def prune_resnet(model, pruning_ratio=0.5):
     """
     Unstructured magnitude pruning (PAT benchmark version).
     Zeros individual weights in Conv2d and Linear layers.
+    Args:
+        model:          ResNet model
+        pruning_ratio:  Pruning ratio.
+    Returns:
+        prune_dict: A dictionary containing the pruning ratios for each layer.
+        masks: A dictionary containing the binary masks for each layer indicating pruned weights.
     """
     model.eval()
 
@@ -156,6 +162,11 @@ def register_resnet_hooks(model, masks):
     """
     Registers gradient hooks that zero out gradients for pruned weights
     before the optimizer step. Returns handles for later cleanup.
+    Args:
+        model: ResNet model
+        masks: Dictionary mapping layer names to their corresponding binary masks indicating pruned weights.
+    Returns:
+        List of hook handles that can be removed after finetuning is complete.
     """
     logger.info("Registering gradient hooks")
     named_modules = dict(model.named_modules())
@@ -177,98 +188,17 @@ def register_resnet_hooks(model, masks):
 
     return handles
 
-def prune_resnet_struct(model, data_handler, device='cuda', pruning_ratio=0.5):
-    """
-    Instantiate pruner based on example: https://github.com/VainF/Torch-Pruning/blob/master/examples/torchvision_models/torchvision_pruning.py
-    Args:
-        model:          Model to be pruned.
-        data_handler:   DataManager object.
-        device:         Device to use.
-        pruning_ratio:  Pruning ratio.
-    Returns:
-        dict: A dictionary containing the pruning ratios for each layer.
-    """
-
-    model.to(device).eval()
-    ignored_layers = []
-    for p in model.parameters():
-        p.requires_grad_(True)
-    for m in model.modules():
-        if isinstance(m, nn.Linear) and m.out_features == 1000:
-            ignored_layers.append(m)
-    logger.info(f"Prepped {len(ignored_layers)} ignored layers")
-
-    example_inputs = torch.rand((1, *data_handler.train_set[0][0].shape)).to(device)
-    importance = tp.importance.GroupMagnitudeImportance(p=1)
-    logger.info("Setting up pruner")
-    pruner = tp.pruner.MagnitudePruner(
-        model,
-        example_inputs=example_inputs,
-        importance=importance,
-        iterative_steps=1,
-        pruning_ratio=pruning_ratio,
-        global_pruning=True,
-        ignored_layers=ignored_layers,
-    )
-
-    logger.info(f"Pruner set up for model name: {model.__class__.__name__}")
-    # tp.utils.print_tool.before_pruning(model)
-
-    # Store parameter counts per layer before pruning to compare to pruned later
-    original_param_counts = {}
-    for name, module in model.named_modules():
-        if module not in pruner.ignored_layers:
-            # logger.info(module)
-            if isinstance(module, nn.Conv2d):
-                original_param_counts[name] = module.out_channels
-            elif isinstance(module, nn.Linear):
-                original_param_counts[name] = module.out_features
-
-    logger.info("Computed original parameter counts for each layer")
-
-    layer_channel_cfg = {}
-    for module in model.modules():
-        if module not in pruner.ignored_layers:
-            # logger.info(module)
-            if isinstance(module, nn.Conv2d):
-                layer_channel_cfg[module] = module.out_channels
-            elif isinstance(module, nn.Linear):
-                layer_channel_cfg[module] = module.out_features
-
-    for g in pruner.step(interactive=True):
-        g.prune()
-    # or
-    # pruner.step()
-
-    logger.info("Completed pruning step")
-
-    if isinstance(pruner, (tp.pruner.BNScalePruner, tp.pruner.GroupNormPruner, tp.pruner.GrowingRegPruner)):
-        pruner.update_regularizer()  # if the model has been pruned, we need to update the regularizer
-        pruner.regularize(model)
-
-    # tp.utils.print_tool.after_pruning(model)
-
-    # Get pruned ratios per layer
-    pruned_param_counts = {}
-    for name, module in model.named_modules():
-        if module not in pruner.ignored_layers:
-            if isinstance(module, nn.Conv2d):
-                pruned_param_counts[name] = module.out_channels
-            elif isinstance(module, nn.Linear):
-                pruned_param_counts[name] = module.out_features
-
-    logger.info("Computed pruned parameter counts for each layer")
-
-    pruned_ratios = {}
-    for name, original_param_count in original_param_counts.items():
-        pruned_ratios[name] = 1 - (pruned_param_counts[name] / original_param_count) # We want fraction of pruned weights
-
-    logger.info("Computed pruned ratios. Finished pruning")
-
-    return pruned_ratios
 
 def finetune_resnet(model, data_handler, lr=2e-5, batch_size=64, epochs=10, device='cuda'):
-    """Finetune the ResNet model such that it can be used for linearity metric evaluations."""
+    """Finetune the ResNet model such that it can be used for linearity metric evaluations.
+    Args:
+        model: ResNet model
+        data_handler: DataManager object
+        lr: learning rate
+        batch_size: batch size
+        epochs: number of epochs
+        device: device to use
+    """
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
@@ -518,6 +448,12 @@ def prune_llama(model, data_handler, device='cuda', pruning_ratio=0.5):
     return pruned_ratios, masks
 
 def register_llama_hooks(masks):
+    """Registers gradient hooks that zero out gradients for pruned weights before the optimizer step. Returns handles for later cleanup.
+    Args:
+        masks: List of tuples (module, mask) where module is the layer and mask is the binary mask indicating pruned weights for that layer.
+    Returns:
+        List of hook handles that can be removed after finetuning is complete.
+    """
     logger.info("Registering LLAMA hooks")
     handles = []
     for module, mask in masks:
@@ -530,7 +466,15 @@ def register_llama_hooks(masks):
     return handles
 
 def finetune_llama(model, data_handler, lr=2e-5, batch_size=4, epochs=10, device='cuda'):
-    """Finetune the LLaMA model such that it can be used for linearity metric evaluations."""
+    """Finetune the LLaMA model such that it can be used for linearity metric evaluations.
+    Args:
+        model: LLaMA model
+        data_handler: DataManager object
+        lr: learning rate
+        batch_size: batch size
+        epochs: number of epochs
+        device: device
+    """
 
     model.to(device).train()
 

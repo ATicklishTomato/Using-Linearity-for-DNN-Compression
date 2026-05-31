@@ -27,6 +27,13 @@ class FeatureLoss(nn.Module):
         self.regressor = nn.Linear(input_dim, output_dim).to(device)
 
     def forward(self, student_features, teacher_features):
+        """Compute the mean squared error loss between student and teacher feature embeddings.
+        Args:
+            student_features: student feature embeddings
+            teacher_features: teacher feature embeddings
+        Returns:
+            loss: mean squared error loss between student and teacher feature embeddings
+        """
         # if student_features.shape[-1] != teacher_features.shape[-2]:
         #     logger.info(f"Reshaping student features from {student_features.shape} to match teacher features {teacher_features.shape}")
         #     student_features = self.regressor(student_features)
@@ -34,6 +41,13 @@ class FeatureLoss(nn.Module):
         return loss
 
 def get_student_resnet(blocks=None, bottleneck=False):
+    """Get student ResNet model from ResNet model.
+    Args:
+        blocks: The blocks list to be passed to ResNet constructor. Default is None, gets set to [1, 2, 2, 2].
+        bottleneck: Whether to use bottleneck blocks. If False, uses BasicBlock.
+    Returns:
+        model: ResNet model
+    """
     if blocks is None:
         blocks = [1, 2, 2, 2]
     if bottleneck:
@@ -47,6 +61,13 @@ def get_student_resnet(blocks=None, bottleneck=False):
 
 
 def load_teacher_into_student(teacher, student):
+    """Load the teacher model weights into the student model, skipping any mismatched layers (important for reduced blocks).
+    Args:
+        teacher: ResNet model
+        student: ResNet model
+    Returns:
+        student: ResNet model with teacher weights loaded where possible
+    """
     teacher_dict = teacher.state_dict()
     student_dict = student.state_dict()
 
@@ -66,11 +87,27 @@ def load_teacher_into_student(teacher, student):
     return student
 
 def hook(module, input, output, feature_list):
+    """Forward hook to capture intermediate features from the model during the forward pass.
+    Args:
+        module: the module to which the hook is registered
+        input: the input to the module during the forward pass
+        output: the output from the module during the forward pass
+        feature_list: list to store the captured features
+    """
     feature = output
     feature_list.append(feature)
 
 def train_student_resnet(teacher_model, student_model, data_handler, optimizer,
                          loss_layers, device='cuda', epochs=5):
+    """Train a student ResNet model from a teacher ResNet model.
+    Args:
+        teacher_model: ResNet model
+        student_model: ResNet model
+        data_handler: DataHandler object
+        optimizer: torch.optim.Optimizer
+        device: torch.device
+        epochs: number of epochs
+    """
     teacher_model.to(device).eval()
     student_model.to(device).train()
 

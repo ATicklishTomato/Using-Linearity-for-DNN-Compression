@@ -28,6 +28,14 @@ class ForwardKLLoss(torch.nn.Module):
         self.ignore_index = ignore_index
 
     def forward(self, student_logits, teacher_logits, labels) -> torch.Tensor:
+        """Computes the forward KL divergence between the teacher and student logits, averaged over non-ignored targets.
+        Args:
+            student_logits: logits of the student model
+            teacher_logits: logits of the teacher model
+            labels: ground truth labels
+        Returns:
+            loss: average KL divergence between teacher and student logits
+        """
         # Implementation from https://github.com/jongwooko/distillm
         # Computes the softmax of the teacher logits
         teacher_prob = F.softmax(teacher_logits, dim=-1, dtype=torch.float32)
@@ -43,6 +51,13 @@ class ForwardKLLoss(torch.nn.Module):
         return -torch.sum(x * mask.view(-1), dim=0) / torch.sum(mask.view(-1), dim=0)
 
 def get_student_resnet(blocks=None, bottleneck=False):
+    """Get student ResNet model from ResNet model.
+    Args:
+        blocks: The blocks list to be passed to ResNet constructor. Default is None, gets set to [1, 2, 2, 2].
+        bottleneck: Whether to use bottleneck blocks. If False, uses BasicBlock.
+    Returns:
+        model: ResNet model
+    """
     if blocks is None:
         blocks = [1, 2, 2, 2]
     if bottleneck:
@@ -56,6 +71,13 @@ def get_student_resnet(blocks=None, bottleneck=False):
 
 
 def load_teacher_into_student(teacher, student):
+    """Load the teacher model weights into the student model, skipping any mismatched layers (important for reduced blocks).
+    Args:
+        teacher: ResNet model
+        student: ResNet model
+    Returns:
+        student: ResNet model with teacher weights loaded where possible
+    """
     teacher_dict = teacher.state_dict()
     student_dict = student.state_dict()
 
@@ -76,6 +98,15 @@ def load_teacher_into_student(teacher, student):
 
 
 def train_student_resnet(teacher_model, student_model, data_handler, optimizer, device='cuda', epochs=5):
+    """Train a student ResNet model from a teacher ResNet model.
+    Args:
+        teacher_model: ResNet model
+        student_model: ResNet model
+        data_handler: DataHandler object
+        optimizer: torch.optim.Optimizer
+        device: torch.device
+        epochs: number of epochs
+    """
     teacher_model.to(device).eval()
     student_model.to(device).train()
 

@@ -14,6 +14,7 @@ os.environ['WANDB_DIR'] = './wandb_logs'
 logger = logging.getLogger(__name__)
 
 def parse_args():
+    """Parses command-line arguments for the experiment."""
     parser = ArgumentParser(description='Execute experiments on inherent linearity in ResNets and Llamas.')
     parser.add_argument('-m', '--model', type=str,
                         choices=['resnet18', 'resnet34', 'resnet50', 'llama-2-7b', 'llama-3-1b', 'llama-3-3b'],
@@ -80,6 +81,9 @@ def parse_args():
 
 
 if __name__ == '__main__':
+    """Main function to execute the experiment based on command-line arguments. It sets up logging, 
+    initializes Weights and Biases for experiment tracking, and calls the appropriate experiment function based on 
+    the specified model and experiment type."""
     args = parse_args()
 
     if args.data_fraction is None:

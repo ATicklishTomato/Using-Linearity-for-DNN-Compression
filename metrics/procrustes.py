@@ -112,6 +112,11 @@ def flatten_representation(X, Y=None):
 def center_and_normalize(X, eps=1e-8):
     """
     Center columns, then normalize.
+    Args:
+        X: [N,D] tensor
+        eps: a small number to avoid division by zero
+    Returns:
+        X: [N,D] tensor with zero mean and unit Frobenius norm
     """
     X = X.float()
     X = X - X.mean(dim=0, keepdim=True)
@@ -126,6 +131,12 @@ def compute_linearity_score(X, Y):
 
     via least squares:
         A = pinv(X_tilde) @ Y_tilde
+
+    Args:
+        X: [N,D] tensor
+        Y: [N,D] tensor
+    Returns:
+        score: Procrustes-based linearity score in [0,1], higher is more linear.
     """
     X, Y = flatten_representation(X, Y)
     X = center_and_normalize(X)
@@ -166,13 +177,15 @@ def expand_scores_to_individual_layers(scores, is_resnet, conv_names: Optional[l
     return new_scores
 
 
-# ============================================================
-# Hook logic
-# ============================================================
-
 def hook_fn(module, inputs, output, storage, name):
     """
     Save input and output from block.
+    Args:
+        module: the module being hooked
+        inputs: tuple of inputs to the module
+        output: output from the module
+        storage: dict to save activations, structured as storage[layer_name] = {"x": tensor, "y": tensor}
+        name: name of the layer/block being hooked
     """
     x = inputs[0].detach()
     if len(storage[name]["x"]) == 0:
@@ -189,10 +202,6 @@ def hook_fn(module, inputs, output, storage, name):
     else:
         storage[name]["y"] = torch.cat([storage[name]["y"], y.cpu()], dim=0)
 
-
-# ============================================================
-# Main function
-# ============================================================
 
 def procrustes_based_linearity(
     model,

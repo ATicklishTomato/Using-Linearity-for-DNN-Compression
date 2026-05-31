@@ -124,6 +124,17 @@ def merge_convs(conv1, conv2):
     return new_conv
 
 def merge_linear_conv_sequences(model, linear_layers, device='cuda'):
+    """Merge sequences of conv-bn pairs in the model that are all deemed linear by the linearity metric.
+    For example, in a BasicBlock, if both conv1 and conv2 are linear, we can merge them into a single conv layer.
+    In a Bottleneck, if conv1, conv2, and conv3 are all linear, we can merge them into a single conv layer.
+    This is done by first merging each BN into its own conv, then merging the convs together.
+    Args:
+        model (nn.Module): Model to be merged
+        linear_layers (list): List of linear layers
+        device (str, optional): Device to be used. Defaults to 'cuda'.
+    Returns:
+        merged_pairs (list): List of tuples of merged layer names
+    """
     merged_pairs = []
     model.to(device)
 

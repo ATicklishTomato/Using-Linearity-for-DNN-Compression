@@ -16,11 +16,25 @@ SUPERGLUE_TASKS = ["boolq", "cb", "copa", "multirc", "record", "rte", "wic", "ws
 # ---------------------------------------------------------------------------
 
 def _format_boolq(ex):
+    """Boolean Question Answering: label is 1 for 'yes', 0 for 'no'.
+    Args:
+        ex: dict with keys 'passage', 'question', 'label' (0 or 1)
+    Returns:
+        Formatted string like:
+        "Passage: ...\nQuestion: ...\nAnswer: yes/no"
+    """
     label = "yes" if ex["label"] == 1 else "no"
     return f"Passage: {ex['passage']}\nQuestion: {ex['question']}\nAnswer: {label}"
 
 
 def _format_cb(ex):
+    """Commitment Bank: label is 0 for 'entailment', 1 for 'contradiction', 2 for 'neutral'.
+    Args:
+        ex: dict with keys 'passage', 'question', 'label' (0 or 1)
+    Returns:
+        Formatted string like:
+        "Passage: ...\nQuestion: ...\nAnswer: ..."
+    """
     label_map = {0: "entailment", 1: "contradiction", 2: "neutral"}
     return (
         f"Premise: {ex['premise']}\n"
@@ -30,6 +44,13 @@ def _format_cb(ex):
 
 
 def _format_copa(ex):
+    """Choice of Plausible Alternatives: label is 0 for choice1, 1 for choice2.
+    Args:
+        ex: dict with keys 'premise', 'question' ('cause' or 'effect'), 'choice1', 'choice2', 'label' (0 or 1)
+    Returns:
+        Formatted string like:
+        "Premise: ...\nWhat was the cause/effect?\nAnswer: ..."
+    """
     question_str = (
         "What was the cause?" if ex["question"] == "cause"
         else "What happened as a result?"
@@ -39,6 +60,13 @@ def _format_copa(ex):
 
 
 def _format_multirc(ex):
+    """Multi-sentence Reading Comprehension: label is 1 for 'true', 0 for 'false'.
+    Args:
+        ex: dict with keys 'paragraph', 'question', 'answer', 'label' (0 or 1)
+    Returns:
+        Formatted string like:
+        "Paragraph: ...\nQuestion: ...\nAnswer candidate: ... — true/false"
+    """
     # HF flattens MultiRC: each row is a (paragraph, question, answer, label) tuple
     label_str = "true" if ex["label"] == 1 else "false"
     return (
@@ -49,6 +77,13 @@ def _format_multirc(ex):
 
 
 def _format_record(ex):
+    """Reading Comprehension with Commonsense Reasoning Dataset: 'answers' is a list of strings (may be empty).
+    Args:
+        ex: dict with keys 'passage', 'query', 'answers' (list of strings)
+    Returns:
+        Formatted string like:
+        "Passage: ...\nQuery: ...\nAnswer: answer1, answer2, ..."
+    """
     # 'answers' is a list; may be empty for some val rows
     answers = ", ".join(ex.get("answers") or [])
     return (
@@ -59,6 +94,13 @@ def _format_record(ex):
 
 
 def _format_rte(ex):
+    """Recognizing Textual Entailment: label is 0 for 'entailment', 1 for 'not entailment'.
+    Args:
+        ex: dict with keys 'premise', 'hypothesis', 'label' (0 or 1)
+    Returns:
+        Formatted string like:
+        "Premise: ...\nHypothesis: ...\nRelation: entailment/not entailment"
+    """
     label_str = "entailment" if ex["label"] == 0 else "not entailment"
     return (
         f"Premise: {ex['premise']}\n"
@@ -68,6 +110,13 @@ def _format_rte(ex):
 
 
 def _format_wic(ex):
+    """Word-in-Context: label is 1 for 'same sense', 0 for 'different sense'.
+    Args:
+        ex: dict with keys 'word', 'sentence1', 'sentence2', 'label' (0 or 1)
+    Returns:
+        Formatted string like:
+        "Word: ...\nSentence 1: ...\nSentence 2: ...\nSame sense: true/false"
+    """
     label_str = "true" if ex["label"] == 1 else "false"
     return (
         f"Word: {ex['word']}\n"
@@ -78,6 +127,13 @@ def _format_wic(ex):
 
 
 def _format_wsc(ex):
+    """Winograd Schema Challenge: label is 1 for 'span2 refers to span1', 0 for 'span2 does not refer to span1'.
+    Args:
+        ex: dict with keys 'text', 'span1_text', 'span2_text', 'label' (0 or 1)
+    Returns:
+        Formatted string like:
+        "Text: ...\nDoes 'span2_text' refer to 'span1_text'? true/false"
+    """
     label_str = "true" if ex["label"] else "false"
     return (
         f"Text: {ex['text']}\n"
@@ -97,23 +153,38 @@ _FORMATTERS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Preprocessing helpers
-# ---------------------------------------------------------------------------
-
 def _clean_text(text):
+    """Clean text by removing unwanted characters and normalizing whitespace.
+    Args:
+        text: text to clean
+    Returns:
+        Cleaned text
+    """
     text = re.sub(r"[^a-zA-Z0-9\s.,!?']", "", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
 def _add_text_field(dataset, task):
-    """Add a unified 'text' column using the task-specific formatter."""
+    """Add a unified 'text' column using the task-specific formatter.
+    Args:
+        dataset: HuggingFace Dataset object
+        task: one of the SUPERGLUE_TASKS
+    Returns:
+        HuggingFace Dataset object
+    """
     formatter = _FORMATTERS[task]
     return dataset.map(lambda ex: {"text": formatter(ex)})
 
 
 def _tokenize(examples, tokenizer):
+    """Tokenize the 'text' field using the provided tokenizer, with truncation and padding.
+    Args:
+        examples: HuggingFace Dataset object
+        tokenizer: HuggingFace Tokenizer object
+    Returns:
+        HuggingFace Dataset object
+    """
     cleaned = [_clean_text(t) for t in examples["text"]]
     return tokenizer(
         cleaned,
@@ -125,6 +196,12 @@ def _tokenize(examples, tokenizer):
 _KEEP_COLUMNS = {"text", "input_ids", "attention_mask"}
 
 def _normalize_features(dataset):
+    """Normalize dataset features by keeping only the 'text', 'input_ids', and 'attention_mask' columns, and ensuring all categorical features are cast to int64.
+    Args:
+        dataset: HuggingFace Dataset object
+    Returns:
+        HuggingFace Dataset object
+    """
     cols_to_remove = [col for col in dataset.column_names if col not in _KEEP_COLUMNS]
     if cols_to_remove:
         dataset = dataset.remove_columns(cols_to_remove)
@@ -135,9 +212,6 @@ def _normalize_features(dataset):
 
     return dataset
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 def load_datasets(
     tokenizer,
@@ -146,22 +220,16 @@ def load_datasets(
     reduction_fraction=0.1,
     seed=42,
 ):
-    """
-    Load, preprocess, and (optionally) reduce SuperGLUE tasks for use with
-    LLaMA-based models. Mirrors the TinyStories loader interface.
-
+    """Loads and preprocesses the specified SuperGLUE tasks, with options for caching and reducing dataset size for faster experimentation.
     Args:
-        tokenizer:            HuggingFace tokenizer.
-        batch_size:           Batch size used during dataset.map() preprocessing.
-        tasks:                List of SuperGLUE task names to include, or None for
-                              all tasks (see SUPERGLUE_TASKS).
-        reduction_fraction:   Fraction of each task's data to keep (0 < f <= 1.0).
-                              A per-task floor is applied to avoid tasks with
-                              too few samples for meaningful evaluation.
-        seed:                 Random seed for shuffling / selection.
-
+        tokenizer: HuggingFace Tokenizer object for tokenizing SuperGLUE datasets.
+        batch_size: Number of samples per batch for tokenization.
+        tasks: List of SuperGLUE tasks to load (default: all tasks).
+        reduction_fraction: Fraction of the dataset to use for training and validation (default: 0.1 for faster experimentation).
+        seed: Random seed for shuffling and reproducibility (default: 42).
     Returns:
-        train_set, val_set — concatenated across all requested tasks.
+        train_set: Preprocessed training dataset containing the specified SuperGLUE tasks.
+        val_set: Preprocessed validation dataset containing the specified SuperGLUE tasks.
     """
     if tasks is None:
         tasks = SUPERGLUE_TASKS

@@ -194,6 +194,20 @@ def get_loaders(traindata, testdata, nsamples, seed, seqlen, tokenizer):
 
 def prune_llama(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_batches=20,
                 semistructured=True, sparsity_ratio=0.5):
+    """Prune a LLaMA model using the Wanda pruning method.
+    Args:
+        model: The LLaMA model to be pruned.
+        data_handler: DataManager object containing the training and validation data.
+        device: The device to use for pruning.
+        prune_n: The number of weights to prune in each group (for structured n:m pruning).
+        prune_m: The size of each group (for structured n:m pruning).
+        max_batches: The maximum number of batches to use for calibration.
+        semistructured: Whether to use semistructured pruning (Wanda variant) or unstructured pruning.
+        sparsity_ratio: The target sparsity ratio for unstructured pruning.
+    Returns:
+        model: The pruned LLaMA model.
+        masks: A list of tuples containing the pruned layers and their corresponding masks.
+    """
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
@@ -297,6 +311,12 @@ def prune_llama(model, data_handler, device='cuda', prune_n=0, prune_m=0, max_ba
 
 
 def generate_prune_dict(model):
+    """Generate a dictionary containing the pruning ratios for each layer in the model.
+    Args:
+        model: The pruned model.
+    Returns:
+        dict: A dictionary containing the pruning ratios for each layer.
+    """
     layers = model.model.layers
     prune_dict = {}
     for i, layer in enumerate(layers):

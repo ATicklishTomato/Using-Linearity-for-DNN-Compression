@@ -5,8 +5,8 @@ This repository encompasses experimental code for my thesis on linearity in CNNs
 ## Repository layout
 
 - `main.py` \- project entry / orchestration script (see file for CLI usage)
-- `sweep.py` \- script for running hyperparameter sweeps using Weights & Biases
 - `visualize.py` \- script for summarizing and visualizing results from experiments
+- `result_aides.py` \- helper functions for summarizing results further, and produce one-off visualizations for the paper
 - `experiments/` \- general experiment code, which run the experiments and log results
 - `compression_methods/` \- code for the different existing compression methods used for comparison and experiments
 - `data/` \- directory where datasets are stored or downloaded to
@@ -110,67 +110,22 @@ Notes:
 - Larger models (e.g., LLama-2-7B) may require significant VRAM. Adjust batch sizes accordingly or use gradient accumulation if necessary.
 - Results and trained models will be saved in the `results/` directory if the `--save` flag is used.
 
-### Hyperparameter sweep
-A separate script allows for running hyperparameter sweeps using Weights & Biases. See `sweep.py` for details.
-Sweeps can be run using `python sweep.py` with appropriate command line arguments to specify the parameters to sweep over.
-
-```bash
-usage: sweep.py [-h] [-m {resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b}] [-l {mean_preactivation,procrustes,fraction}] [-d {imagenet,tinystories}] [-e {relation,compression,benchmark_compression}]
-                [--relation {magnitude_pruning,basic_kd}] [-t [THRESHOLD ...]] [--batch_size [BATCH_SIZE ...]] [--epochs [EPOCHS ...]] [--lr [LR ...]] [--data_fraction DATA_FRACTION] [--seed SEED] [--sweep_runs SWEEP_RUNS]
-                [--device DEVICE] [--verbose] [--wandb_project WANDB_PROJECT] [--wandb_tags [WANDB_TAGS ...]]
-
-Execute hyperparameter sweep for linearity compression on a specified model, dataset, and linearity metric.
-
-options:
-  -h, --help            show this help message and exit
-  -m {resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b}, --model {resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b}
-                        Model architecture to use for the sweep.
-  -l {mean_preactivation,procrustes,fraction}, --linearity {mean_preactivation,procrustes,fraction}
-                        Linearity metric to use for the sweep. For info on the metrics, check main.py arguments help.
-  -d {imagenet,tinystories}, --dataset {imagenet,tinystories}
-                        Dataset to use for sweep training and evaluation.
-  -e {relation,compression,benchmark_compression}, --experiment {relation,compression,benchmark_compression}
-                        The type of experiment to run. "relation" tests the relation between inherent linearity and another compression method. "compression" tests inherent linearity as a tool for compression.
-                        "benchmark_compression" runs other compression methods to allow a comparison.
-  --relation {magnitude_pruning,basic_kd}
-                        The relation experiment to run. Only applicable if experiment type is "relation". Ignored otherwise.
-  -t [THRESHOLD ...], --threshold [THRESHOLD ...]
-                        The thresholds to try for determining what is(n\'t) linear. To take a percentile, enter a percentage, e.g. '75%' to consider anything smaller the 75th percentile as non-linear. To take a hard threshold,
-                        enter a floating point value, e.g. '-0.01'. Default is 75th percentile.
-  --batch_size [BATCH_SIZE ...]
-                        Batch size for training and evaluation.
-  --epochs [EPOCHS ...]
-                        Number of epochs for training and fine-tuning.
-  --lr [LR ...]         Learning rate for optimizer.
-  --data_fraction DATA_FRACTION
-                        Fraction of data to use for training and evaluation.
-  --seed SEED           Random seed for reproducibility.
-  --sweep_runs SWEEP_RUNS
-                        Number of runs to execute for the sweep.
-  --device DEVICE       Device to run the experiments on (e.g., "cpu", "cuda").
-  --verbose             Enable verbose logging.
-  --wandb_project WANDB_PROJECT
-                        Weights & Biases project name for logging.
-  --wandb_tags [WANDB_TAGS ...]
-                        List of tags to add to the Weights and Biases run for better organization.
-```
-
 ### Visualizing average results
 
 A separate script allows for the summarizing of results from different random seeds. Results are grabbed from the `results/` directory and averaged across seeds, then visualized using matplotlib and written to a LaTeX table. See `visualize.py` for details.
 
 ```bash
-usage: visualize.py [-h] [--rq {rq1,rq2,benchmark} [{rq1,rq2,benchmark} ...]] [--threshold THRESHOLD [THRESHOLD ...]]
+usage: visualize.py [-h] [--rq {rq1,rq2,benchmark,hybridization} [{rq1,rq2,benchmark,hybridization} ...]] [--threshold {float,25,50,75} [{float,25,50,75} ...]]
                     [--model {resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b} [{resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b} ...]]
                     [--dataset {imagenet,tinystories,cifar10,superglue} [{imagenet,tinystories,cifar10,superglue} ...]]
                     [--relation_to {magnitude_pruning,basic_kd,hessian_pruning,taylor_pruning,feature_kd,born_again_kd,slicegpt,wanda_pruning} [{magnitude_pruning,basic_kd,hessian_pruning,taylor_pruning,feature_kd,born_again_kd,slicegpt,wanda_pruning} ...]]
-                    [--linearity {mean_preactivation,procrustes,fraction} [{mean_preactivation,procrustes,fraction} ...]]
+                    [--linearity {mean_preactivation,procrustes,fraction} [{mean_preactivation,procrustes,fraction} ...]] [--approx]
 
 options:
   -h, --help            show this help message and exit
-  --rq {rq1,rq2,benchmark} [{rq1,rq2,benchmark} ...]
+  --rq {rq1,rq2,benchmark,hybridization} [{rq1,rq2,benchmark,hybridization} ...]
                         Which Research Question to aggregate results for
-  --threshold THRESHOLD [THRESHOLD ...]
+  --threshold {float,25,50,75} [{float,25,50,75} ...]
                         Threshold to aggregate results for
   --model {resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b} [{resnet18,resnet34,resnet50,llama-2-7b,llama-2-13b,llama-3-1b,llama-3-3b} ...]
                         Which model to aggregate results for
@@ -181,6 +136,7 @@ options:
   --linearity {mean_preactivation,procrustes,fraction} [{mean_preactivation,procrustes,fraction} ...]
                         Linearity metric to use. `mean_preactivation` refers to the mean of preactivations as defined by Pinson et al. (2024). `procrustes` refers to the Procrustes similarity-based metric as defined by
                         Razzhigaev et al (2024). `fraction` refers to the fraction of neurons that is activated by an activation function.
+  --approx              Whether to aggregate results for linear approximator method instead of layer merging for RQ1. Only applicable for ResNets.
 ```
 
 ## Thanks

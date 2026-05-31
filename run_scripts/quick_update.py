@@ -5,7 +5,10 @@ target = '-e relation'
 replace = '-e hybridization -l fraction --threshold "25%"'
 
 if __name__ == "__main__":
-    # Find all .bash files in the specified path
+    """This script updates all .bash files in the specified path by replacing the target string with the new string.
+    It searches for the target string in each file, and if found, it replaces it and saves the updated content back to the file. 
+    It also prints out which files were updated and which did not contain the target string.
+    """
     import glob
     files = glob.glob(path, recursive=True)
     for file in files:

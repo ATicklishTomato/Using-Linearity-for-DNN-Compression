@@ -5,6 +5,14 @@ import matplotlib.pyplot as plt
 
 def plot_layer_metrics(layer_labels, mean_preactivations, fractions, procrustes,
                        path):
+    """Plots the three metrics across layers in a single figure with three subplots.
+    Args:
+        layer_labels: List of layer names.
+        mean_preactivations: Mean preactivation values.
+        fractions: Fraction of neuron activations.
+        procrustes: Procrustes scores.
+        path: Path to save the figure.
+    """
     fig, axes = plt.subplots(1, 3, figsize=(14, 4), sharex=True)
 
     metrics = [mean_preactivations, fractions, procrustes]
@@ -36,6 +44,10 @@ def plot_layer_metrics(layer_labels, mean_preactivations, fractions, procrustes,
     plt.close()
 
 def make_analysis_graphs(model):
+    """Aggregates the metrics across all runs for a given model and plots them.
+    Args:
+        model: Model name.
+    """
     fractions_path = f"./results/rq1/*/*/{model}/tinystories/*/activation_fractions.json"
     preactivations_path = f"./results/rq1/*/*/{model}/tinystories/*/mean_preactivations.json"
     procrustes_path = f"./results/rq1/*/*/{model}/tinystories/*/procrustes_scores.json"
@@ -59,6 +71,11 @@ def make_analysis_graphs(model):
     plot_layer_metrics(labels, preactivations_scores, fraction_scores, procrustes_scores, f"./{model}_tinystories_metrics_comparison.png")
 
 def make_latex_table(model, approx=False):
+    """Aggregates all single experiment LaTeX tables into a single one for a given model.
+    Args:
+        model: Model name.
+        approx: Whether to use the resnet results of linear approximation experiments.
+    """
     approx = "approx/" if approx else ""
     path = f'./results/rq1/{approx}*/*/{model}/*/results.tex'
 
@@ -84,6 +101,11 @@ def make_latex_table(model, approx=False):
         f.write(start + rows + finish)
 
 def get_average_original_results(model, dataset):
+    """Gets the average original accuracy and parameter count across all runs for a given model and dataset.
+    Args:
+        model: Model name.
+        dataset: Dataset name.
+    """
     path = f'./results/rq1/*/*/{model}/{dataset}/*/*results.json'
     results = glob.glob(path)
     accuracies = []

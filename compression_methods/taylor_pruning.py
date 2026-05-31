@@ -9,6 +9,22 @@ logger = logging.getLogger(__name__)
 
 def prune(experimenter, data_handler, device='cuda', pruning_ratio=0.5,
                            lr=2e-5, batch_size=64, epochs=10):
+    """Prune the model using Taylor expansion-based importance and then finetune it.
+    Args:
+        experimenter: ResnetExperimenter
+        data_handler: DataManager object
+        device: 'cuda' or 'cpu'
+        pruning_ratio: fraction of weights to prune in each iteration (e.g., 0.5 for 50%)
+        lr: learning rate
+        batch_size: batch size
+        epochs: number of epochs
+    Returns:
+        pruned_ratios: dict of layer names to fraction of weights pruned
+        acc: accuracy after finetuning
+        params: number of parameters after pruning
+        infer_time: inference time after pruning
+        gflops: GFLOPs after pruning
+    """
 
     # Importance criteria
     model = deepcopy(experimenter.model)

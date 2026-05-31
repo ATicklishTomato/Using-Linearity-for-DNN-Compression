@@ -17,6 +17,16 @@ debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 class ResNetExperimenter:
     def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate,
                  device='cuda', skip_finetune_path=None):
+        """Initialize the ResNetExperimenter with the specified parameters.
+        Args:
+            model_name:         Name of the ResNet model to use (e.g., "resnet18", "resnet34", "resnet50").
+            data_handler:       An instance of DataHandler that provides access to the training and validation datasets.
+            batch_size:         Batch size for training and validation.
+            epochs:             Number of epochs to finetune the model.
+            learning_rate:      Learning rate for the optimizer during finetuning.
+            device:             Device to run the model on (e.g., 'cuda' or 'cpu').
+            skip_finetune_path: Optional path pattern to a pre-finetuned model. If provided, the experimenter will attempt to load this model instead of finetuning from scratch.
+        """
         self.model_name = model_name
         self.data_handler = data_handler
         self.batch_size = batch_size
@@ -55,7 +65,12 @@ class ResNetExperimenter:
 
 
     def _initialize_resnet_model(self, layers):
-        """Initialize a ResNet model with the specified number of layers."""
+        """Initialize a ResNet model with the specified number of layers.
+        Args:
+            layers: Number of layers in the ResNet model (e.g., 18, 34, 50).
+        Returns:
+            A ResNet model initialized with pretrained weights for ImageNet.
+        """
         match layers:
             case 18:
                 model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)

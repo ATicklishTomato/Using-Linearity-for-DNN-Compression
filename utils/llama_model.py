@@ -17,6 +17,16 @@ debug_mode = logger.getEffectiveLevel() != logging.DEBUG
 
 class LlamaExperimenter:
     def __init__(self, model_name, data_handler, batch_size, epochs, learning_rate, device='cuda', skip_finetune_path = None):
+        """Initialize the LLaMA experimenter with the specified model, data handler, training parameters, and device.
+        Args:
+            model_name (str): The name of the LLaMA model to use (e.g., "llama-2-7b", "llama-2-13b", "llama-3-1b", "llama-3-3b").
+            data_handler: An instance of the DataManager class that provides access to the training and validation datasets.
+            batch_size (int): The batch size to use during finetuning and validation.
+            epochs (int): The number of epochs to finetune the model.
+            learning_rate (float): The learning rate to use during finetuning.
+            device (str, optional): The device to use for training and inference (e.g., 'cuda' or 'cpu'). Defaults to 'cuda'.
+            skip_finetune_path (str, optional): If provided, the path to a finetuned model to load instead of performing finetuning. Defaults to None.
+        """
         self.model_name = model_name
         self.data_handler = data_handler
         self.batch_size = batch_size
@@ -55,7 +65,12 @@ class LlamaExperimenter:
             self.finetune()
 
     def _initialize_llama_model(self, model_path):
-        """Initialize a LLaMA model with the specified path."""
+        """Initialize a LLaMA model with the specified path.
+        Args:
+            model_path (str): The path to the pretrained LLaMA model.
+        Returns:
+            model: The initialized LLaMA model.
+        """
         if logger.getEffectiveLevel() != logging.DEBUG:
             disable_progress_bar()
         model = LlamaForCausalLM.from_pretrained(model_path).to(self.device)

@@ -45,6 +45,7 @@ pretty_benchmark_names = {
 
 
 def parse_args():
+    """Parses command line arguments for result aggregation and visualization."""
     parser = argparse.ArgumentParser()
     parser.add_argument('--rq', type=str, choices=['rq1', 'rq2', 'benchmark', 'hybridization'], default=['rq1'], nargs='+',
                         help='Which Research Question to aggregate results for')
@@ -71,6 +72,16 @@ def parse_args():
     return parser.parse_args()
 
 def mean_rq1_results(path):
+    """This function reads all *results.json files in the given path, extracts the 'accuracy_loss', 'param_compression_ratio',
+    'speedup', and 'gflop_reduction' metrics, and computes the mean for each metric across all files.
+    It returns a dictionary containing the mean values for each metric.
+    Args:
+        path: The directory path where the *results.json files are located. The function will search for these files recursively
+                within the directory and its subdirectories.
+    Returns:
+        A dictionary with the mean values for 'accuracy_loss', 'param_compression_ratio', 'speedup', and 'gflop_reduction'.
+                The keys of the dictionary are the metric names, and the values are the corresponding mean values computed from all the *results.json files.
+    """
     # Read all *results.json files for 'accuracy_loss', 'param_compression_ratio', 'speedup', and 'tflop_reduction' and compute the mean for each metric
     metrics = ['accuracy_loss', 'param_compression_ratio', 'speedup', 'gflop_reduction']
     results = {metric: [] for metric in metrics}
@@ -91,7 +102,16 @@ def mean_rq1_results(path):
     return mean_results
 
 def generate_latex_results_table(mean_results, model, dataset, linearity, threshold, path, compression_method):
-    """This function takes a dictionary of mean results, and generates a latex table. Gets stored in the results directory"""
+    """This function takes a dictionary of mean results, and generates a latex table. Gets stored in the results directory
+    Args:
+        mean_results: A dictionary containing the mean values for 'accuracy_loss', 'param_compression_ratio', 'speedup', and 'gflop_reduction'.
+        model: The name of the model (e.g., 'resnet18', 'llama-2-7b').
+        dataset: The name of the dataset (e.g., 'imagenet', 'tinystories').
+        linearity: The linearity metric used (e.g., 'mean_preactivation', 'fraction', 'procrustes').
+        threshold: The threshold used for the linearity metric (e.g., '0', '5', '25', '50', '75').
+        path: The directory path where the results are stored. The generated LaTeX table will be saved in this directory as 'results.tex'.
+        compression_method: The compression method used (e.g., 'Layer merging', 'Linear approximators', 'Magnitude pruning', etc.)
+    """
 
 
     if threshold == '0':
@@ -118,6 +138,15 @@ def generate_latex_results_table(mean_results, model, dataset, linearity, thresh
         f.write(table)
 
 def mean_benchmark_results(path):
+    """This function reads all wandb_logging_data.json files in the given path, extracts the 'accuracy_loss', 'param_compression_ratio',
+    'speedup', and 'gflop_reduction' metrics, and computes the mean for each metric across all files.
+    It returns a dictionary containing the mean values for each metric.
+    Args:
+        path: The directory path where the wandb_logging_data.json files are stored.
+    Returns:
+        A dictionary with the mean values for 'accuracy_loss', 'param_compression_ratio', 'speedup', and 'gflop_reduction'.
+                The keys of the dictionary are the metric names, and the values are the corresponding mean values computed from all the wandb_logging_data.json files.
+    """
     metrics = ['accuracy_loss', 'param_compression_ratio', 'speedup', 'gflop_reduction']
     results = {metric: [] for metric in metrics}
     files = glob.glob(path + '/**/wandb_logging_data.json', recursive=True)
@@ -138,6 +167,15 @@ def mean_benchmark_results(path):
 
 
 def avg_rq2_prune_scores(path):
+    """This function reads all wandb_logging_data.json files and prune_dict.json files in the given path,
+     extracts the 'linearity_scores_mean_preactivation', 'linearity_scores_fraction', 'linearity_scores_procrustes'
+     metrics, and pruning ratios, and computes the mean for each metric across all files.
+     It returns dictionaries containing the mean values for each metric and pruning ratios.
+    Args:
+        path: The directory path where the wandb_logging_data.json files are stored.
+    Returns:
+        A dictionary with the mean values for each metric and pruning ratios.
+    """
     mean_preactivations = []
     fraction_scores = []
     procrustes_scores = []
@@ -174,6 +212,12 @@ def avg_rq2_prune_scores(path):
     return avg_mean_preactivation, avg_mean_fraction, avg_mean_procrustes, avg_pruning_ratios
 
 def avg_rq2_linearity_scores(path):
+    """Gets all the averaged linearity metric scores.
+    Args:
+        path: The directory path where the wandb_logging_data.json files are stored.
+    Returns:
+        A dictionary with the average linearity metric scores for each metric and pruning ratios.
+    """
     mean_preactivations = []
     fraction_scores = []
     procrustes_scores = []
@@ -421,7 +465,22 @@ def save_teacher_metrics_table(
     procrustes_scores
 ):
 
+    """Saves a table of teacher layer names and their corresponding mean preactivation, fraction, and procrustes scores.
+    Args:
+        save_path: The path to save the table image.
+        teacher_layer_names: List of teacher layer names.
+        mean_preactivations: A dictionary mapping teacher layer names to mean preactivation values.
+        fractions: A dictionary mapping teacher layer names to fraction scores.
+        procrustes_scores: A dictionary mapping teacher layer names to procrustes scores.
+    """
     def short_name(name):
+        """Shortens the layer name for better display in the table. For LLaMA models, it extracts the layer number.
+        For ResNet models, it removes the 'layer' prefix.
+        Args:
+            name: Name of the layer.
+        Returns:
+            name: Shortened layer name.
+        """
         if "llama" in save_path:
             parts = name.split(".")
             return parts[2] if len(parts) >= 3 else name
@@ -483,6 +542,12 @@ def save_teacher_metrics_table(
     plt.close()
 
 def avg_rq2_matrix_values(path):
+    """Computes average CKA matrix for KD experiment.
+    Args:
+        path: The path to find the multiple matrices
+    Returns:
+        avg_matrix: The average CKA matrix
+    """
     files = glob.glob(path + '/**/cka_similarity_matrix.npy', recursive=True)
     print(files)
     avg_matrix = None
@@ -496,6 +561,15 @@ def avg_rq2_matrix_values(path):
     return avg_matrix
 
 def rq2_parallel_coordinates_metrics_avg_cka(path, matrix, teacher_layer_names, mean_preactivations, fractions, procrustes_scores):
+    """Create parallel coordinates plot highlighting average CKA and linearity metrics for teacher model
+    Args:
+        path: The path to find the multiple matrices
+        matrix: The CKA matrices to average
+        teacher_layer_names: List of teacher layer names.
+        mean_preactivations: A dictionary mapping teacher layer names to mean preactivation values.
+        fractions: A dictionary mapping teacher layer names to fraction scores.
+        procrustes_scores: A dictionary mapping teacher layer names to procrustes scores.
+    """
     # Average CKA matrix across columns
     average_teacher_cka = np.mean(matrix, axis=1)
 
@@ -604,6 +678,7 @@ def rq2_parallel_coordinates_metrics_avg_cka(path, matrix, teacher_layer_names, 
 
 
 if __name__ == '__main__':
+    """Visualize results gathered from experiments easily and quickly. Use CLI to indicate the combinations"""
     args = parse_args()
 
     options = [args.rq, args.threshold, args.model, args.dataset, args.relation_to, args.linearity]

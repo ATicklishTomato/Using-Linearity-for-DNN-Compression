@@ -5,6 +5,14 @@ from torchvision.datasets import ImageFolder
 
 
 def make_subset(dataset, fraction=0.1, seed=42):
+    """Returns a random subset of the given dataset.
+    Args:
+        dataset: the dataset to be subset
+        fraction: fraction of the dataset to be returned
+        seed: random seed
+    Returns:
+        A random subset of the given dataset.
+    """
     torch.manual_seed(seed)
     indices = torch.randperm(len(dataset))[:int(len(dataset) * fraction)]
     return Subset(dataset, indices)
@@ -12,6 +20,13 @@ def make_subset(dataset, fraction=0.1, seed=42):
 
 
 def load_datasets(reduction_fraction=0.1, seed=42):
+    """Loads the ImageNet dataset and applies the necessary transformations.
+    Args:
+        reduction_fraction: fraction of the dataset to be returned
+        seed: random seed
+    Returns:
+        A tuple of (train_dataset, val_dataset) where each dataset is a random subset of the original ImageNet dataset.
+    """
     train_tfms = transforms.Compose([
         transforms.RandomResizedCrop(224),
         transforms.RandomHorizontalFlip(),
